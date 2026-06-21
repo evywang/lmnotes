@@ -66,7 +66,12 @@ mod tests {
         let dt = NaiveDateTime::parse_from_str("2026-06-21T14:30:00", "%Y-%m-%dT%H:%M:%S").unwrap();
         let suffix = &new_note_id(dt)["nt_20260621_1430_".len()..];
         assert!(suffix.bytes().all(|b| CROCKFORD.contains(&b)));
-        assert!(!suffix.contains('I') && !suffix.contains('L') && !suffix.contains('O') && !suffix.contains('U'));
+        assert!(
+            !suffix.contains('I')
+                && !suffix.contains('L')
+                && !suffix.contains('O')
+                && !suffix.contains('U')
+        );
     }
 
     #[test]
@@ -93,7 +98,7 @@ mod tests {
 
     #[test]
     fn is_valid_rejects_wrong_suffix_length() {
-        assert!(!is_valid("nt_20260621_1430_ABC"));   // 3 位
+        assert!(!is_valid("nt_20260621_1430_ABC")); // 3 位
         assert!(!is_valid("nt_20260621_1430_ABCDE")); // 5 位
     }
 }

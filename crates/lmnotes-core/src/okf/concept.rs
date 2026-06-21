@@ -15,7 +15,10 @@ impl Concept {
     pub fn parse(text: &str) -> Result<Self> {
         let (yaml, body) = split_frontmatter(text)?;
         let frontmatter = Frontmatter::parse(yaml)?;
-        Ok(Self { frontmatter, body: body.to_string() })
+        Ok(Self {
+            frontmatter,
+            body: body.to_string(),
+        })
     }
 }
 

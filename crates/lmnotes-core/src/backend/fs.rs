@@ -17,7 +17,9 @@ pub struct FsBackend {
 
 impl FsBackend {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: Arc::new(root.into()) }
+        Self {
+            root: Arc::new(root.into()),
+        }
     }
 
     fn resolve(&self, rel: &str) -> Result<PathBuf> {
@@ -75,7 +77,10 @@ impl StorageBackend for FsBackend {
             let full = e.path();
             let stripped = full.strip_prefix(self.root.as_path()).unwrap_or(&full);
             let rel = stripped.to_string_lossy().replace('\\', "/");
-            entries.push(DirEntry { path: rel, is_dir: e.file_type()?.is_dir() });
+            entries.push(DirEntry {
+                path: rel,
+                is_dir: e.file_type()?.is_dir(),
+            });
         }
         Ok(entries)
     }

@@ -28,9 +28,14 @@ impl Vault {
     pub fn open(path: impl AsRef<std::path::Path>) -> Result<Self> {
         let p = path.as_ref();
         if !p.exists() {
-            return Err(CoreError::Conformance(format!("vault not found: {}", p.display())));
+            return Err(CoreError::Conformance(format!(
+                "vault not found: {}",
+                p.display()
+            )));
         }
-        Ok(Self { backend: Box::new(FsBackend::new(p)) })
+        Ok(Self {
+            backend: Box::new(FsBackend::new(p)),
+        })
     }
 
     /// 创建新 vault 骨架（含根 index.md，声明 okf_version）。
@@ -46,7 +51,10 @@ impl Vault {
         // 根 index.md（OKF §6 + §11 okf_version 声明）
         vault
             .backend
-            .write_file("index.md", b"---\nokf_version: \"0.1\"\n---\n\n# Vault Index\n")
+            .write_file(
+                "index.md",
+                b"---\nokf_version: \"0.1\"\n---\n\n# Vault Index\n",
+            )
             .await?;
         Ok(vault)
     }
@@ -78,7 +86,9 @@ impl Vault {
                     let (yaml, _body) = match crate::okf::concept::split_frontmatter(text) {
                         Ok(v) => v,
                         Err(_) => {
-                            report.errors.push((e.path.clone(), "no frontmatter (§9 rule 1)".into()));
+                            report
+                                .errors
+                                .push((e.path.clone(), "no frontmatter (§9 rule 1)".into()));
                             continue;
                         }
                     };

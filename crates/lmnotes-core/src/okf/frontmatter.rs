@@ -112,7 +112,10 @@ custom: value
         let fm = Frontmatter::parse(yaml).unwrap();
         let out = fm.to_yaml().unwrap();
         let fm2 = Frontmatter::parse(&out).unwrap();
-        assert_eq!(fm2.extra.get("custom").and_then(|v| v.as_str()), Some("value"));
+        assert_eq!(
+            fm2.extra.get("custom").and_then(|v| v.as_str()),
+            Some("value")
+        );
     }
 
     #[test]

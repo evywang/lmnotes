@@ -54,7 +54,10 @@ fn strip_extensions_remains_conformant() {
     c.frontmatter.created = None;
     let yaml = c.frontmatter.to_yaml().unwrap();
     let report = validate_frontmatter(&yaml).unwrap();
-    assert!(report.is_conformant(), "stripped concept must be OKF-conformant");
+    assert!(
+        report.is_conformant(),
+        "stripped concept must be OKF-conformant"
+    );
 }
 
 #[test]
