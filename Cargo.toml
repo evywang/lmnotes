@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/lmnotes-core"]
+members = ["crates/lmnotes-core", "crates/lmnotes-cli"]
 resolver = "2"
 
 [workspace.package]
