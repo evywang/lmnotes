@@ -66,7 +66,7 @@ fn parse_rejects_missing_frontmatter() {
 #[test]
 fn join_round_trips() {
     let (yaml, body) = split_frontmatter(SAMPLE).unwrap();
-    let joined = join_concept(&yaml, &body);
+    let joined = join_concept(yaml, body);
     assert!(joined.starts_with("---\n"));
     assert!(joined.contains("---\n\n# LLM Wiki"));
 }

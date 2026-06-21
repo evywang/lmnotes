@@ -1,0 +1,6 @@
+disallowed-methods = [
+    { path = "std::fs::read", reason = "use StorageBackend::read_file" },
+    { path = "std::fs::write", reason = "use StorageBackend::write_file" },
+    { path = "std::fs::File::open", reason = "use StorageBackend" },
+    { path = "std::fs::File::create", reason = "use StorageBackend" },
+]

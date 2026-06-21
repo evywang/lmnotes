@@ -17,16 +17,16 @@ impl Concept {
         let frontmatter = Frontmatter::parse(yaml)?;
         Ok(Self { frontmatter, body: body.to_string() })
     }
-
-    /// 序列化为完整 concept 文件文本。
-    pub fn to_string(&self) -> String {
-        join_concept_yaml(&self.frontmatter.to_yaml().unwrap_or_default(), &self.body)
-    }
 }
 
+/// `Display` 提供序列化（等价于 `to_string()`）。
+/// 不定义 inherent `to_string` 以避免遮蔽 `Display::to_string`（clippy inherent_to_string_shadow_display）。
 impl std::fmt::Display for Concept {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.to_string())
+        f.write_str(&join_concept_yaml(
+            &self.frontmatter.to_yaml().unwrap_or_default(),
+            &self.body,
+        ))
     }
 }
 
