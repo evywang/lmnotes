@@ -6,5 +6,6 @@ pub mod backend;
 pub mod error;
 pub mod id;
 pub mod okf;
+pub mod vault;
 
 pub use error::{CoreError, Result};
