@@ -1,6 +1,6 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
-use super::schema::{CREATE_CONCEPTS, CREATE_EDGES, CREATE_VEC, ConceptRow, EdgeRow};
+use super::schema::{ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_VEC};
 use crate::backend::IndexBackend;
 use crate::Result;
 use async_trait::async_trait;
@@ -35,7 +35,9 @@ impl SqliteIndex {
         }
         ensure_vec_extension();
         let conn = Connection::open(path)?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 
     /// 内存库（测试用）。
@@ -43,7 +45,9 @@ impl SqliteIndex {
     pub fn in_memory() -> Result<Self> {
         ensure_vec_extension();
         let conn = Connection::open_in_memory()?;
-        Ok(Self { conn: Mutex::new(conn) })
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
     }
 }
 
@@ -74,7 +78,14 @@ impl IndexBackend for SqliteIndex {
         conn.execute(
             "INSERT OR REPLACE INTO concepts (id, path, type_, title, mtime, content_hash)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            rusqlite::params![row.id, row.path, row.type_, row.title, row.mtime, row.content_hash],
+            rusqlite::params![
+                row.id,
+                row.path,
+                row.type_,
+                row.title,
+                row.mtime,
+                row.content_hash
+            ],
         )?;
         Ok(())
     }
@@ -94,7 +105,12 @@ impl IndexBackend for SqliteIndex {
                 "INSERT INTO edges (src_id, dst_id, dst_path, link_text) VALUES (?1, ?2, ?3, ?4)",
             )?;
             for e in &edges {
-                stmt.execute(rusqlite::params![e.src_id, e.dst_id, e.dst_path, e.link_text])?;
+                stmt.execute(rusqlite::params![
+                    e.src_id,
+                    e.dst_id,
+                    e.dst_path,
+                    e.link_text
+                ])?;
             }
         }
         Ok(())
@@ -120,8 +136,8 @@ impl IndexBackend for SqliteIndex {
 
     fn backrefs(&self, dst_id: &str) -> Result<Vec<EdgeRow>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT src_id, dst_id, dst_path, link_text FROM edges WHERE dst_id = ?1")?;
+        let mut stmt = conn
+            .prepare("SELECT src_id, dst_id, dst_path, link_text FROM edges WHERE dst_id = ?1")?;
         let rows = stmt.query_map([dst_id], |r| {
             Ok(EdgeRow {
                 src_id: r.get(0)?,

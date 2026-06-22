@@ -14,6 +14,9 @@ pub enum CoreError {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
+    #[error("Tantivy error: {0}")]
+    Tantivy(#[from] tantivy::TantivyError),
+
     #[error("UTF-8 decode error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
 }
