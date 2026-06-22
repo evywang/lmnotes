@@ -1,3 +1,4 @@
 pub mod schema;
+pub mod sqlite;
 
-// T3 填充 sqlite，T4 填充 tantivy
+pub use sqlite::SqliteIndex;

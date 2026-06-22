@@ -11,6 +11,9 @@ pub enum CoreError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
     #[error("UTF-8 decode error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
 }
