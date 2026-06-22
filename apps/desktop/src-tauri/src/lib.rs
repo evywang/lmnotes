@@ -118,7 +118,8 @@ pub fn run() {
             commands::search,
             commands::read_concept,
             commands::save_concept,
-            commands::quick_capture
+            commands::quick_capture,
+            commands::insert_image
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

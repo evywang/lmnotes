@@ -114,3 +114,27 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
 
     Ok(daily_path)
 }
+
+/// 插入图片：按 SHA-256 哈希存 assets/img/<前2位>/<hash>.<ext>（去重）。
+/// 返回 bundle-relative 路径（带前导 /），供前端插入 markdown 图片链接。
+#[tauri::command]
+pub async fn insert_image(data: Vec<u8>, ext: String) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(&data);
+    let hash = hex::encode(h.finalize());
+    let prefix = &hash[..2];
+    let rel = format!("assets/img/{prefix}/{hash}.{ext}");
+    let full = vault_root().join(&rel);
+    if !full.exists() {
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, &data)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(format!("/{rel}"))
+}
