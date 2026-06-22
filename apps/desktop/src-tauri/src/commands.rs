@@ -1,8 +1,8 @@
 //! Tauri 命令定义。M1a 逐步填充。
 
+use lmnotes_core::indexer::Indexer;
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
-use lmnotes_core::indexer::Indexer;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::State;
@@ -51,9 +51,13 @@ pub async fn save_concept(
 ) -> Result<(), String> {
     let full = vault_root().join(&path);
     if let Some(p) = full.parent() {
-        tokio::fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    tokio::fs::write(&full, &text).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&full, &text)
+        .await
+        .map_err(|e| e.to_string())?;
     // 解析并增量索引（T10 把这里改为文件事件触发）
     match Concept::parse(&text) {
         Ok(c) => {
@@ -88,9 +92,13 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
             date = date
         );
         if let Some(p) = full.parent() {
-            tokio::fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
-        tokio::fs::write(&full, header).await.map_err(|e| e.to_string())?;
+        tokio::fs::write(&full, header)
+            .await
+            .map_err(|e| e.to_string())?;
     }
 
     // 追加捕获条目（带时间戳）
@@ -100,7 +108,9 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
         .await
         .map_err(|e| e.to_string())?;
     existing.push_str(&entry);
-    tokio::fs::write(&full, existing).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&full, existing)
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(daily_path)
 }

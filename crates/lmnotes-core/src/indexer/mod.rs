@@ -159,6 +159,76 @@ fn extract_edges(body: &str) -> Vec<RawEdge> {
     edges
 }
 
+/// 遍历 vault 目录，对每个合规 concept 增量索引。
+/// 用于启动时全量重建（若索引为空）或外部编辑感知重索引。
+/// 跳过 parse 失败的文件（Vault::validate 会报告），返回 (已检查数, 已索引数)。
+pub async fn walk_and_index(
+    indexer: &Indexer,
+    backend: &dyn crate::backend::StorageBackend,
+    root: &std::path::Path,
+) -> (usize, usize) {
+    let mut checked = 0usize;
+    let mut indexed = 0usize;
+    let _ = walk_dir(indexer, backend, root, root, &mut checked, &mut indexed).await;
+    (checked, indexed)
+}
+
+async fn walk_dir(
+    indexer: &Indexer,
+    backend: &dyn crate::backend::StorageBackend,
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    checked: &mut usize,
+    indexed: &mut usize,
+) -> Result<()> {
+    use crate::okf::validator::{validate_filename, FileKind};
+    let entries = backend.list_dir(&rel(root, dir)).await?;
+    for e in entries {
+        let full = dir.join(&e.path);
+        let name = full
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if e.is_dir {
+            // e.path 是相对 vault 根的路径
+            let sub = root.join(&e.path);
+            // async 递归需 Box::pin
+            Box::pin(walk_dir(indexer, backend, root, &sub, checked, indexed)).await?;
+            continue;
+        }
+        if validate_filename(&name) != FileKind::Concept {
+            continue;
+        }
+        *checked += 1;
+        let rel = e.path.clone();
+        // 读文件
+        match backend.read_file(&rel).await {
+            Ok(data) => {
+                let text = match std::str::from_utf8(&data) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                match Concept::parse(text) {
+                    Ok(c) => match indexer.index_concept(&rel, text, &c).await {
+                        Ok(true) => *indexed += 1,
+                        Ok(false) => {}
+                        Err(err) => eprintln!("index fail {rel}: {err}"),
+                    },
+                    Err(err) => eprintln!("parse skip {rel}: {err}"),
+                }
+            }
+            Err(err) => eprintln!("read skip {rel}: {err}"),
+        }
+    }
+    Ok(())
+}
+
+fn rel(root: &std::path::Path, dir: &std::path::Path) -> String {
+    dir.strip_prefix(root)
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
