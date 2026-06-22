@@ -23,3 +23,21 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace --all-targets
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install frontend deps
+        run: cd apps/desktop && npm ci
+      - name: TypeScript check
+        run: cd apps/desktop && npx tsc --noEmit
+      - name: Frontend build
+        run: cd apps/desktop && npm run build
+      - name: Tauri crate check
+        run: cargo check -p lmnotes-desktop
