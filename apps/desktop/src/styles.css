@@ -3,6 +3,8 @@
   --fg: #cdd6f4;
   --accent: #89b4fa;
   --border: #45475a;
+  --muted: #6c7086;
+  --hover: #313244;
 }
 @media (prefers-color-scheme: light) {
   :root {
@@ -10,17 +12,111 @@
     --fg: #4c4f69;
     --accent: #1e66f5;
     --border: #bcc0cc;
+    --muted: #9ca0b0;
+    --hover: #e6e9ef;
   }
 }
 * {
   box-sizing: border-box;
 }
-body {
+html,
+body,
+#root {
+  height: 100%;
   margin: 0;
+}
+body {
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
 }
-h1 {
+
+/* 三栏布局 */
+.layout {
+  display: grid;
+  grid-template-columns: 260px 1fr 260px;
+  height: 100vh;
+}
+.sidebar,
+.backrefs {
+  border-right: 1px solid var(--border);
+  padding: 0.5rem;
+  overflow: auto;
+}
+.backrefs {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
+.content {
   padding: 1rem;
+  overflow: auto;
+}
+
+/* 搜索栏 */
+.search-input {
+  width: 100%;
+  padding: 0.5rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.result-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+}
+.result-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  text-align: left;
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  gap: 2px;
+}
+.result-item:hover {
+  background: var(--hover);
+}
+.result-title {
+  font-size: 0.9rem;
+}
+.result-path {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+/* 占位与提示 */
+.placeholder {
+  color: var(--muted);
+  text-align: center;
+  margin-top: 2rem;
+}
+.editor-placeholder {
+  color: var(--muted);
+  padding: 1rem;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 0.8rem;
+}
+.panel-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
