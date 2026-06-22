@@ -69,3 +69,38 @@ pub async fn save_concept(
     }
     Ok(())
 }
+
+/// 快速捕获：写入当日 daily note（不存在则创建）。
+/// 返回 daily note 的相对路径，便于前端打开。
+#[tauri::command]
+pub async fn quick_capture(text: String) -> Result<String, String> {
+    use chrono::Utc;
+    let root = vault_root();
+    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let daily_path = format!("notes/daily/{date}.md");
+    let full = root.join(&daily_path);
+
+    // 若不存在，创建带 frontmatter 的 daily note
+    if !full.exists() {
+        let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+        let header = format!(
+            "---\ntype: daily\nid: {id}\ntitle: {date}\n---\n\n# {date}\n\n",
+            date = date
+        );
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p).await.map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, header).await.map_err(|e| e.to_string())?;
+    }
+
+    // 追加捕获条目（带时间戳）
+    let time = Utc::now().format("%H:%M").to_string();
+    let entry = format!("\n## {time}\n\n{text}\n");
+    let mut existing = tokio::fs::read_to_string(&full)
+        .await
+        .map_err(|e| e.to_string())?;
+    existing.push_str(&entry);
+    tokio::fs::write(&full, existing).await.map_err(|e| e.to_string())?;
+
+    Ok(daily_path)
+}

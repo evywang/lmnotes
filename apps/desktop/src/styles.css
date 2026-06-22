@@ -153,3 +153,39 @@ body {
 .cm-host .cm-editor {
   height: 100%;
 }
+
+/* 快速捕获浮窗 */
+.capture-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  z-index: 100;
+}
+.capture-box {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  width: 560px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.capture-input {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.6rem;
+  resize: vertical;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.capture-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}

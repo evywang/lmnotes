@@ -44,7 +44,8 @@ pub fn run() {
             commands::ping,
             commands::search,
             commands::read_concept,
-            commands::save_concept
+            commands::save_concept,
+            commands::quick_capture
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
