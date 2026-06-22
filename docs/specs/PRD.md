@@ -475,7 +475,10 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | 阶段 | 范围 | 关键交付 | 退出标准 |
 |---|---|---|---|
 | **M0 基础（2 周）** | Rust workspace、CI、`lmnotes-core`：OKF 解析/校验/ID 生成、Validator（对齐官方 §9）、`StorageBackend` trait + FsBackend、`lmnotes-cli` 校验工具 | 能创建 vault、读写 OKF 笔记、CLI `validate` 通过 | OKF round-trip + Validator + §9 合规测试通过 |
-| **M1 桌面 MVP（4 周）** | Markdown 编辑器、快速捕获、文本+图片；SQLite+Tantivy(jieba-rs)+sqlite-vec 派生索引；混合检索；本地 Ollama 摘要/链接建议；建议中心 | 桌面单用户可用 | §13 验收 A+B 组全过 |
+| **M1 桌面 MVP（拆为 M1a/M1b/M1c）** | | | |
+| ↳ M1a 编辑器+索引层（2 周） | Tauri 壳、SolidJS、CodeMirror 6、快速捕获、图片、三层索引（SQLite/Tantivy+jieba/sqlite-vec）、增量索引、混合检索 | 能写笔记、保存即索引、搜索（纯本地） | §13 B 组前 2 环 |
+| ↳ M1b LLM+建议中心（1.5 周） | Provider 抽象（Ollama/OpenAI）、路由、护栏、索引器接 LLM（摘要/标签/链接）、建议中心、就地改写+撤销、向量层填充 | LLM 建议可审阅接受 | §13 B 组 3–5 环 |
+| ↳ M1c 图谱问答（0.5 周） | 向量 RAG、Chat with Vault、流式回答+引用 | 问答带可点击引用 | §13 B 组闭环 |
 | **M2 多模态（3 周）** | 语音输入、Whisper 转录、音频/视频转录 concept、视觉描述、媒体队列 | US-1/US-4 可用 | §13 C 组 |
 | **M3 图谱与问答（3 周）** | 向量 RAG、图谱视图、Chat with Vault、行动项抽取 | US-2/US-3 可用 | §13 D 组 |
 | **M4 多 Provider 与云（2 周）** | 多 Provider 路由、隐私护栏、用量仪表盘 | US-6 可用 | §13 E 组 |

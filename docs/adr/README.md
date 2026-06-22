@@ -37,7 +37,7 @@
 | [0001](ADR-0001-okf-alignment.md) | OKF 对齐与合规扩展边界 | Accepted (rev1: F1 ID策略澄清) | 2026-06-21 |
 | [0002](ADR-0002-tauri-core-boundary.md) | Tauri 架构与 lmnotes-core 边界 | Accepted (rev1: F2 StorageBackend trait + F3 DTO) | 2026-06-21 |
 | [0003](ADR-0003-index-three-layer.md) | 索引三层架构（SQLite/Tantivy/sqlite-vec） | Accepted (rev1: F4 Tantivy更新语义 + F5 邻接增量) | 2026-06-21 |
-| [0004](ADR-0004-frontend-stack.md) | 前端框架/编辑器/图谱库选型 | Accepted (rev1: F6 Tiptap+Solid风险) | 2026-06-21 |
+| [0004](ADR-0004-frontend-stack.md) | 前端框架/编辑器/图谱库选型 | Accepted (rev1: F6 Tiptap+Solid风险; rev2: M1a改用CodeMirror 6) | 2026-06-21 |
 | [0005](ADR-0005-llm-provider-guardrails.md) | LLM Provider 抽象与隐私护栏 | Accepted (rev1: F7 能力门控trait) | 2026-06-21 |
 
 ## 与 PRD 的关系
