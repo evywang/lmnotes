@@ -120,3 +120,36 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* 编辑器 */
+.editor-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.editor-toolbar {
+  padding: 0.3rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.editor-path {
+  font-family: ui-monospace, monospace;
+}
+.dirty-dot {
+  color: var(--accent);
+}
+.cm-host {
+  flex: 1;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.cm-host .cm-editor {
+  height: 100%;
+}

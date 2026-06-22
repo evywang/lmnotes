@@ -1,5 +1,6 @@
 import { For, Show, createEffect, onCleanup } from "solid-js";
 import { useVault, runSearch } from "./store/vault";
+import { Editor } from "./editor/Editor";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
@@ -46,8 +47,7 @@ export function App() {
 
       <main class="content">
         <Show when={activePath()} fallback={<p class="placeholder">选择左侧笔记或搜索</p>}>
-          {/* T8 接入 CodeMirror 编辑器 */}
-          <div class="editor-placeholder">编辑器加载中：{activePath()}</div>
+          <Editor path={activePath()!} />
         </Show>
       </main>
 

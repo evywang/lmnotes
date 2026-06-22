@@ -40,7 +40,12 @@ pub fn run() {
         .manage(fulltext)
         .manage(indexer)
         .manage(engine)
-        .invoke_handler(tauri::generate_handler![commands::ping, commands::search])
+        .invoke_handler(tauri::generate_handler![
+            commands::ping,
+            commands::search,
+            commands::read_concept,
+            commands::save_concept
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
