@@ -18,6 +18,9 @@ sqlite-vec = { workspace = true }
 tantivy = { workspace = true }
 jieba-rs = { workspace = true }
 tantivy-tokenizer-api = "0.3"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+bitflags = "2.13"
+futures-util = "0.3"
 # 注：tantivy-jieba 0.20 需要 tantivy 0.26+（其 tokenizer_api 是 0.7.0），
 # 与我们用的 tantivy 0.22 不兼容。M1a 暂用手写 JiebaTokenizer 适配器（已通过全部测试）。
 # 未来升级 tantivy 至 0.26+ 后可切换到 tantivy-jieba。
@@ -25,3 +28,4 @@ tantivy-tokenizer-api = "0.3"
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

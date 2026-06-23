@@ -7,6 +7,7 @@ pub mod error;
 pub mod id;
 pub mod index;
 pub mod indexer;
+pub mod llm;
 pub mod okf;
 pub mod search;
 pub mod vault;

@@ -17,6 +17,9 @@ pub enum CoreError {
     #[error("Tantivy error: {0}")]
     Tantivy(#[from] tantivy::TantivyError),
 
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+
     #[error("UTF-8 decode error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
 }
