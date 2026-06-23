@@ -3,15 +3,21 @@ import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
+import { ProviderSettings } from "./settings/ProviderSettings";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
+  const [settingsOpen, setSettingsOpen] = createSignal(false);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
       e.preventDefault();
       setCaptureOpen(true);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+      e.preventDefault();
+      setSettingsOpen(true);
     }
   };
   window.addEventListener("keydown", onKeyDown);
@@ -60,8 +66,15 @@ export function App() {
         </aside>
       </div>
 
+      <button class="settings-btn" title="Provider 设置 (Ctrl+,)" onClick={() => setSettingsOpen(true)}>
+        ⚙
+      </button>
+
       <Show when={captureOpen()}>
         <Capture onClose={() => setCaptureOpen(false)} />
+      </Show>
+      <Show when={settingsOpen()}>
+        <ProviderSettings onClose={() => setSettingsOpen(false)} />
       </Show>
     </>
   );

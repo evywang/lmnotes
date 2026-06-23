@@ -174,10 +174,7 @@ pub fn list_suggestions(
 }
 
 #[tauri::command]
-pub fn accept_suggestion(
-    id: String,
-    sqlite: State<'_, Arc<SqliteIndex>>,
-) -> Result<(), String> {
+pub fn accept_suggestion(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
     sqlite
         .set_suggestion_status(&id, SuggestionStatus::Accepted)
         .map_err(|e| e.to_string())
@@ -185,10 +182,7 @@ pub fn accept_suggestion(
 }
 
 #[tauri::command]
-pub fn reject_suggestion(
-    id: String,
-    sqlite: State<'_, Arc<SqliteIndex>>,
-) -> Result<(), String> {
+pub fn reject_suggestion(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
     sqlite
         .set_suggestion_status(&id, SuggestionStatus::Rejected)
         .map_err(|e| e.to_string())
@@ -253,4 +247,59 @@ pub async fn save_snapshot(concept_path: String, text: String) -> Result<String,
         .await
         .map_err(|e| e.to_string())?;
     Ok(rel)
+}
+
+// ============ Provider 配置（T10）============
+
+#[tauri::command]
+pub fn get_config() -> Result<crate::llm_config::Config, String> {
+    Ok(crate::llm_config::Config::load_or_default())
+}
+
+#[tauri::command]
+pub fn set_config(config: crate::llm_config::Config) -> Result<(), String> {
+    config.save()
+}
+
+/// 探测 Provider 健康状态（首启检测用）。
+#[tauri::command]
+pub async fn probe_providers(
+    config: crate::llm_config::Config,
+) -> Result<Vec<ProviderHealth>, String> {
+    use lmnotes_core::llm::ollama::OllamaProvider;
+    use lmnotes_core::llm::openai::OpenAiProvider;
+    use lmnotes_core::llm::LlmProvider;
+    let mut results = Vec::new();
+    for p in &config.providers {
+        match p {
+            crate::llm_config::ProviderConfig::Ollama { base_url, .. } => {
+                let ollama = OllamaProvider::new(base_url);
+                let ok = ollama.health().await.unwrap_or(false);
+                results.push(ProviderHealth {
+                    provider_id: "ollama".into(),
+                    healthy: ok,
+                });
+            }
+            crate::llm_config::ProviderConfig::OpenAi {
+                id,
+                base_url,
+                api_key,
+                ..
+            } => {
+                let openai = OpenAiProvider::new(id, base_url, api_key);
+                let ok = openai.health().await.unwrap_or(false);
+                results.push(ProviderHealth {
+                    provider_id: id.clone(),
+                    healthy: ok,
+                });
+            }
+        }
+    }
+    Ok(results)
+}
+
+#[derive(serde::Serialize)]
+pub struct ProviderHealth {
+    pub provider_id: String,
+    pub healthy: bool,
 }

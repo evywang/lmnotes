@@ -1,14 +1,14 @@
 //! LMNotes 桌面应用（Tauri 2）IPC 壳。
 
 mod commands;
+mod llm_config;
 
 use lmnotes_core::backend::fs::FsBackend;
 use lmnotes_core::index::sqlite::SqliteIndex;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::indexer::{walk_and_index, Indexer};
 use lmnotes_core::llm::guard::GuardConfig;
-use lmnotes_core::llm::ollama::OllamaProvider;
-use lmnotes_core::llm::routing::{ProviderRef, Registry, Routing, Task};
+use lmnotes_core::llm::routing::{Registry, Routing};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::SearchEngine;
 use notify::{RecursiveMode, Watcher};
@@ -26,35 +26,10 @@ fn vault_dir() -> PathBuf {
 #[allow(dead_code)]
 struct HoldWatcher(Option<notify::RecommendedWatcher>);
 
-/// 构建默认 Registry + Routing（M1b 简化：默认注册 Ollama 本地，
-/// 所有任务指向 ollama。T10 从 config.json 加载并做首启探测）。
-fn build_default_registry_routing() -> (Registry, Routing, GuardConfig) {
-    let mut reg = Registry::new();
-    let ollama = Arc::new(OllamaProvider::default_local());
-    reg.register_chat_arc(ollama.clone());
-    reg.register_embed_arc(ollama);
-
-    let ollama_ref = ProviderRef {
-        provider_id: "ollama".into(),
-        model: "qwen2.5:7b".into(),
-    };
-    let embed_ref = ProviderRef {
-        provider_id: "ollama".into(),
-        model: "nomic-embed-text".into(),
-    };
-    let routing = Routing {
-        map: [
-            (Task::Summarize, (ollama_ref.clone(), vec![])),
-            (Task::LinkSuggest, (ollama_ref.clone(), vec![])),
-            (Task::Chat, (ollama_ref.clone(), vec![])),
-            (Task::Rewrite, (ollama_ref, vec![])),
-            (Task::Embed, (embed_ref, vec![])),
-        ]
-        .into_iter()
-        .collect(),
-    };
-    let guard = GuardConfig::default(); // cloud_allowed=false（默认本地优先）
-    (reg, routing, guard)
+/// 构建默认 Registry + Routing（M1b-T10：从 config.json 加载）。
+fn build_registry_from_config() -> (Registry, Routing, GuardConfig) {
+    let cfg = llm_config::Config::load_or_default();
+    cfg.build()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -64,15 +39,27 @@ pub fn run() {
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::create_dir_all(&lmnotes_dir);
 
-    let meta = Arc::new(
-        SqliteIndex::open(lmnotes_dir.join("index.sqlite")).expect("open sqlite"),
-    );
-    let fulltext = Arc::new(
-        TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"),
-    );
+    let meta = Arc::new(SqliteIndex::open(lmnotes_dir.join("index.sqlite")).expect("open sqlite"));
+    let fulltext = Arc::new(TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"));
     let indexer = Arc::new(Indexer::new(meta.clone(), fulltext.clone()));
     let engine = Arc::new(SearchEngine::new(meta.clone(), fulltext.clone()));
-    let (registry, routing, guard_cfg) = build_default_registry_routing();
+    let (registry, routing, guard_cfg) = build_registry_from_config();
+
+    // 首启探测：检测 Provider 健康，不可用时日志提示（O6c）
+    tauri::async_runtime::spawn(async {
+        let cfg = llm_config::Config::load_or_default();
+        let healths = commands::probe_providers(cfg).await.unwrap_or_default();
+        for h in &healths {
+            eprintln!(
+                "provider {} health: {}",
+                h.provider_id,
+                if h.healthy { "OK" } else { "UNREACHABLE" }
+            );
+        }
+        if healths.iter().all(|h| !h.healthy) {
+            eprintln!("⚠ No healthy LLM provider. LLM features (suggestions/rewrite) will be disabled. Configure ~/.lmnotes/config.json or start Ollama.");
+        }
+    });
 
     // 启动时全量重建（增量，walk_and_index 跳过未变）
     let indexer_boot = indexer.clone();
@@ -88,21 +75,20 @@ pub fn run() {
     let indexer_watch = indexer.clone();
     let dir_watch = dir.clone();
     let (tx, rx) = channel::<PathBuf>();
-    let watcher_result =
-        notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(e) = res {
-                if matches!(
-                    e.kind,
-                    notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-                ) {
-                    for p in &e.paths {
-                        if p.extension().map(|x| x == "md").unwrap_or(false) {
-                            let _ = tx.send(p.clone());
-                        }
+    let watcher_result = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        if let Ok(e) = res {
+            if matches!(
+                e.kind,
+                notify::EventKind::Create(_) | notify::EventKind::Modify(_)
+            ) {
+                for p in &e.paths {
+                    if p.extension().map(|x| x == "md").unwrap_or(false) {
+                        let _ = tx.send(p.clone());
                     }
                 }
             }
-        });
+        }
+    });
     let watcher = match watcher_result {
         Ok(mut w) => {
             let _ = w.watch(&dir_watch, RecursiveMode::Recursive);
@@ -157,7 +143,10 @@ pub fn run() {
             commands::accept_suggestion,
             commands::reject_suggestion,
             commands::rewrite_selection,
-            commands::save_snapshot
+            commands::save_snapshot,
+            commands::get_config,
+            commands::set_config,
+            commands::probe_providers
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
