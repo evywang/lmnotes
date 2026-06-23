@@ -19,7 +19,11 @@ pub struct OpenAiProvider {
 
 impl OpenAiProvider {
     /// id 用于 Registry 区分多个 OpenAI 兼容端点（如 "glm"、"openai"）。
-    pub fn new(id: impl Into<String>, base_url: impl Into<String>, api_key: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             base_url: base_url.into(),
@@ -42,7 +46,12 @@ impl LlmProvider for OpenAiProvider {
     }
     async fn health(&self) -> Result<bool> {
         let url = format!("{}/v1/models", self.base_url);
-        let r = self.client.get(&url).bearer_auth(&self.api_key).send().await;
+        let r = self
+            .client
+            .get(&url)
+            .bearer_auth(&self.api_key)
+            .send()
+            .await;
         Ok(r.map(|x| x.status().is_success()).unwrap_or(false))
     }
 }
@@ -118,11 +127,8 @@ impl ChatCap for OpenAiProvider {
                         }
                         if let Some(json) = line.strip_prefix("data: ") {
                             if let Ok(c) = serde_json::from_str::<ChatChunk>(json) {
-                                if let Some(content) = c
-                                    .choices
-                                    .into_iter()
-                                    .next()
-                                    .and_then(|ch| ch.delta.content)
+                                if let Some(content) =
+                                    c.choices.into_iter().next().and_then(|ch| ch.delta.content)
                                 {
                                     return Some((Ok(content), (bytes, buf)));
                                 }
@@ -132,7 +138,9 @@ impl ChatCap for OpenAiProvider {
                     }
                     match bytes.next().await {
                         Some(Ok(chunk)) => buf.push_str(&String::from_utf8_lossy(&chunk)),
-                        Some(Err(e)) => return Some((Err(crate::CoreError::Http(e)), (bytes, buf))),
+                        Some(Err(e)) => {
+                            return Some((Err(crate::CoreError::Http(e)), (bytes, buf)))
+                        }
                         None => return None,
                     }
                 }
@@ -189,13 +197,11 @@ mod tests {
         Mock::given(method("POST"))
             .and(path("/v1/chat/completions"))
             .and(header("authorization", "Bearer test-key"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(
-                    "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
                      data: {\"choices\":[{\"delta\":{\"content\":\" there\"}}]}\n\n\
                      data: [DONE]\n\n",
-                ),
-            )
+            ))
             .mount(&server)
             .await;
         let p = OpenAiProvider::new("test", server.uri(), "test-key");

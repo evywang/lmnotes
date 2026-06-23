@@ -1,6 +1,8 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
-use super::schema::{ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_VEC};
+use super::schema::{
+    ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS, CREATE_VEC,
+};
 use crate::backend::IndexBackend;
 use crate::Result;
 use async_trait::async_trait;
@@ -69,7 +71,9 @@ fn row_from_h(rs: &mut rusqlite::Rows<'_>) -> Result<Option<ConceptRow>> {
 impl IndexBackend for SqliteIndex {
     async fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch(&format!("{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_VEC}"))?;
+        conn.execute_batch(&format!(
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_VEC}\n{CREATE_SUGGESTIONS}"
+        ))?;
         Ok(())
     }
 
@@ -151,6 +155,127 @@ impl IndexBackend for SqliteIndex {
             out.push(r?);
         }
         Ok(out)
+    }
+}
+
+// ============ Suggestion Store（M1b）============
+//
+// 注意：这些是 SqliteIndex 的 inherent 方法（不在 IndexBackend trait），
+// 独立 impl 块，避免 "method not a member of trait" 错误。
+impl SqliteIndex {
+    /// sqlite.rs 内的 now_secs 局部副本（indexer::now_secs 是私有的，不能跨模块用）。
+    fn now_secs() -> i64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    }
+
+    pub fn list_pending_suggestions(
+        &self,
+    ) -> crate::Result<Vec<crate::llm::suggestion::SuggestionRecord>> {
+        use crate::llm::suggestion::{Suggestion, SuggestionRecord, SuggestionStatus};
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, concept_id, payload, status FROM suggestions WHERE status='pending' ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let id: String = r.get(0)?;
+            let concept_id: String = r.get(1)?;
+            let payload: String = r.get(2)?;
+            let status: String = r.get(3)?;
+            let suggestion: Suggestion = serde_json::from_str(&payload).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok(SuggestionRecord {
+                id,
+                concept_id,
+                suggestion,
+                status: SuggestionStatus::parse(&status),
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn list_suggestions_for(
+        &self,
+        concept_id: &str,
+    ) -> crate::Result<Vec<crate::llm::suggestion::SuggestionRecord>> {
+        use crate::llm::suggestion::{Suggestion, SuggestionRecord, SuggestionStatus};
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, payload, status FROM suggestions WHERE concept_id=?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map([concept_id], |r| {
+            let id: String = r.get(0)?;
+            let payload: String = r.get(1)?;
+            let status: String = r.get(2)?;
+            let suggestion: Suggestion = serde_json::from_str(&payload).map_err(|e| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    1,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                )
+            })?;
+            Ok(SuggestionRecord {
+                id,
+                concept_id: concept_id.to_string(),
+                suggestion,
+                status: SuggestionStatus::parse(&status),
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn insert_suggestion(
+        &self,
+        id: &str,
+        concept_id: &str,
+        suggestion: &crate::llm::suggestion::Suggestion,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let payload =
+            serde_json::to_string(suggestion).map_err(|e| crate::CoreError::Yaml(e.to_string()))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO suggestions (id, concept_id, kind, payload, status, created_at) VALUES (?1, ?2, ?3, ?4, 'pending', ?5)",
+            rusqlite::params![id, concept_id, suggestion.kind_str(), payload, Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_suggestion_status(
+        &self,
+        id: &str,
+        status: crate::llm::suggestion::SuggestionStatus,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let applied = if matches!(
+            status,
+            crate::llm::suggestion::SuggestionStatus::Accepted
+                | crate::llm::suggestion::SuggestionStatus::Rejected
+        ) {
+            Some(Self::now_secs())
+        } else {
+            None
+        };
+        conn.execute(
+            "UPDATE suggestions SET status=?1, applied_at=COALESCE(?2, applied_at) WHERE id=?3",
+            rusqlite::params![status.as_str(), applied, id],
+        )?;
+        Ok(())
     }
 }
 
@@ -256,5 +381,52 @@ mod tests {
         idx.upsert_concept(row("nt_1", "notes/a.md")).await.unwrap();
         let got = idx.get_concept_by_path("notes/a.md").unwrap();
         assert_eq!(got.unwrap().id, "nt_1");
+    }
+
+    #[tokio::test]
+    async fn suggestion_round_trip() {
+        use crate::llm::suggestion::{Suggestion, SuggestionStatus};
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap(); // 含 CREATE_SUGGESTIONS
+
+        let s = Suggestion::Summary {
+            text: "测试摘要".into(),
+        };
+        idx.insert_suggestion("sg_1", "nt_1", &s).unwrap();
+
+        // pending 列表含刚插入的
+        let pending = idx.list_pending_suggestions().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].id, "sg_1");
+        assert_eq!(pending[0].concept_id, "nt_1");
+        match &pending[0].suggestion {
+            Suggestion::Summary { text } => assert_eq!(text, "测试摘要"),
+            _ => panic!("expected Summary"),
+        }
+
+        // accept 后不在 pending
+        idx.set_suggestion_status("sg_1", SuggestionStatus::Accepted)
+            .unwrap();
+        assert!(idx.list_pending_suggestions().unwrap().is_empty());
+
+        // list_suggestions_for 仍能看到（不限 status）
+        let all = idx.list_suggestions_for("nt_1").unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].status, SuggestionStatus::Accepted);
+
+        // tag/link 类型 round-trip
+        idx.insert_suggestion("sg_2", "nt_1", &Suggestion::Tag { tag: "ai".into() })
+            .unwrap();
+        idx.insert_suggestion(
+            "sg_3",
+            "nt_1",
+            &Suggestion::Link {
+                dst_path: "/notes/x.md".into(),
+                link_text: "x".into(),
+            },
+        )
+        .unwrap();
+        let all2 = idx.list_suggestions_for("nt_1").unwrap();
+        assert_eq!(all2.len(), 3, "should have summary+tag+link");
     }
 }

@@ -34,6 +34,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS vec_concepts USING vec0(
 );
 ";
 
+/// suggestions 表：LLM 建议队列（M1b）。
+pub const CREATE_SUGGESTIONS: &str = "
+CREATE TABLE IF NOT EXISTS suggestions (
+    id          TEXT PRIMARY KEY,
+    concept_id  TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    payload     TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    applied_at  INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_sugg_concept ON suggestions(concept_id);
+CREATE INDEX IF NOT EXISTS idx_sugg_status ON suggestions(status);
+";
+
 #[derive(Debug, Clone)]
 pub struct ConceptRow {
     pub id: String,

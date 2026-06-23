@@ -114,7 +114,9 @@ impl ChatCap for OllamaProvider {
                     }
                     match bytes.next().await {
                         Some(Ok(chunk)) => buf.push_str(&String::from_utf8_lossy(&chunk)),
-                        Some(Err(e)) => return Some((Err(crate::CoreError::Http(e)), (bytes, buf))),
+                        Some(Err(e)) => {
+                            return Some((Err(crate::CoreError::Http(e)), (bytes, buf)))
+                        }
                         None => {
                             if buf.trim().is_empty() {
                                 return None;
@@ -189,13 +191,11 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(path("/api/chat"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_string(
-                    "{\"message\":{\"content\":\"Hello\"},\"done\":false}\n\
+            .respond_with(ResponseTemplate::new(200).set_body_string(
+                "{\"message\":{\"content\":\"Hello\"},\"done\":false}\n\
                      {\"message\":{\"content\":\" world\"},\"done\":false}\n\
                      {\"message\":{},\"done\":true}\n",
-                ),
-            )
+            ))
             .mount(&server)
             .await;
         let p = OllamaProvider::new(server.uri());

@@ -27,6 +27,7 @@ pub struct Routing {
     pub map: HashMap<Task, (ProviderRef, Vec<ProviderRef>)>,
 }
 
+#[derive(Default)]
 pub struct Registry {
     providers: HashMap<String, Arc<dyn LlmProvider>>,
     chats: HashMap<String, Arc<dyn ChatCap>>,
@@ -98,11 +99,7 @@ impl Registry {
     }
 
     /// 按任务取 embed provider。
-    pub fn embed_for(
-        &self,
-        routing: &Routing,
-        task: Task,
-    ) -> Result<(Arc<dyn EmbedCap>, String)> {
+    pub fn embed_for(&self, routing: &Routing, task: Task) -> Result<(Arc<dyn EmbedCap>, String)> {
         let (primary, fallbacks) = routing.map.get(&task).ok_or_else(|| {
             crate::CoreError::Conformance(format!("no routing for task {task:?}"))
         })?;
