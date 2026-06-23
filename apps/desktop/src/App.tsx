@@ -2,6 +2,7 @@ import { For, Show, createSignal, onCleanup } from "solid-js";
 import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
+import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
@@ -54,8 +55,8 @@ export function App() {
         </main>
 
         <aside class="backrefs">
-          <h3 class="panel-title">反向链接</h3>
-          <p class="muted small">（M1b 接入）</p>
+          <h3 class="panel-title">建议中心</h3>
+          <SuggestionCenter />
         </aside>
       </div>
 

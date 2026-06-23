@@ -6,6 +6,9 @@ use lmnotes_core::backend::fs::FsBackend;
 use lmnotes_core::index::sqlite::SqliteIndex;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::indexer::{walk_and_index, Indexer};
+use lmnotes_core::llm::guard::GuardConfig;
+use lmnotes_core::llm::ollama::OllamaProvider;
+use lmnotes_core::llm::routing::{ProviderRef, Registry, Routing, Task};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::SearchEngine;
 use notify::{RecursiveMode, Watcher};
@@ -13,7 +16,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
-/// 默认 vault 目录（M1a 固定 ~/.lmnotes/default；UI 选择器 M1b）。
+/// 默认 vault 目录（M1a 固定 ~/.lmnotes/default；UI 选择器 M1b+）。
 fn vault_dir() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".lmnotes").join("default")
@@ -23,57 +26,83 @@ fn vault_dir() -> PathBuf {
 #[allow(dead_code)]
 struct HoldWatcher(Option<notify::RecommendedWatcher>);
 
+/// 构建默认 Registry + Routing（M1b 简化：默认注册 Ollama 本地，
+/// 所有任务指向 ollama。T10 从 config.json 加载并做首启探测）。
+fn build_default_registry_routing() -> (Registry, Routing, GuardConfig) {
+    let mut reg = Registry::new();
+    let ollama = Arc::new(OllamaProvider::default_local());
+    reg.register_chat_arc(ollama.clone());
+    reg.register_embed_arc(ollama);
+
+    let ollama_ref = ProviderRef {
+        provider_id: "ollama".into(),
+        model: "qwen2.5:7b".into(),
+    };
+    let embed_ref = ProviderRef {
+        provider_id: "ollama".into(),
+        model: "nomic-embed-text".into(),
+    };
+    let routing = Routing {
+        map: [
+            (Task::Summarize, (ollama_ref.clone(), vec![])),
+            (Task::LinkSuggest, (ollama_ref.clone(), vec![])),
+            (Task::Chat, (ollama_ref.clone(), vec![])),
+            (Task::Rewrite, (ollama_ref, vec![])),
+            (Task::Embed, (embed_ref, vec![])),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    let guard = GuardConfig::default(); // cloud_allowed=false（默认本地优先）
+    (reg, routing, guard)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let dir = vault_dir();
     let lmnotes_dir = dir.join(".lmnotes");
-    // 确保默认 vault 目录存在（首次启动）
     let _ = std::fs::create_dir_all(&dir);
     let _ = std::fs::create_dir_all(&lmnotes_dir);
 
-    let meta = Arc::new(SqliteIndex::open(lmnotes_dir.join("index.sqlite")).expect("open sqlite"));
-    let fulltext = Arc::new(TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"));
+    let meta = Arc::new(
+        SqliteIndex::open(lmnotes_dir.join("index.sqlite")).expect("open sqlite"),
+    );
+    let fulltext = Arc::new(
+        TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"),
+    );
     let indexer = Arc::new(Indexer::new(meta.clone(), fulltext.clone()));
     let engine = Arc::new(SearchEngine::new(meta.clone(), fulltext.clone()));
+    let (registry, routing, guard_cfg) = build_default_registry_routing();
 
-    // 启动时全量重建：若 concepts 表为空，遍历 vault 索引（T12）
+    // 启动时全量重建（增量，walk_and_index 跳过未变）
     let indexer_boot = indexer.clone();
     let dir_boot = dir.clone();
     tauri::async_runtime::spawn(async move {
-        // schema 初始化
         let _ = indexer_boot.meta.init_schema().await;
-        // 判断是否为空（任意一条记录都不存在 → 全量重建）
-        let empty = indexer_boot
-            .meta
-            .get_concept("__boot_probe__")
-            .unwrap_or(None)
-            .is_none();
-        // 更可靠的空判：尝试常见路径都不存在则重建。M1a 简化：每次启动都跑一遍增量
-        // walk_and_index（增量逻辑会跳过未变，成本可控）。
-        let _ = empty;
         let backend = FsBackend::new(&dir_boot);
         let (checked, indexed) = walk_and_index(&indexer_boot, &backend, &dir_boot).await;
         eprintln!("startup index: {checked} checked, {indexed} (re)indexed");
     });
 
-    // 文件监听：外部编辑 .md 触发重索引（T10）
+    // 文件监听：外部编辑 .md 触发重索引
     let indexer_watch = indexer.clone();
     let dir_watch = dir.clone();
     let (tx, rx) = channel::<PathBuf>();
-    let watcher_result = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-        if let Ok(e) = res {
-            if matches!(
-                e.kind,
-                notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-            ) {
-                for p in &e.paths {
-                    if p.extension().map(|x| x == "md").unwrap_or(false) {
-                        let _ = tx.send(p.clone());
+    let watcher_result =
+        notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            if let Ok(e) = res {
+                if matches!(
+                    e.kind,
+                    notify::EventKind::Create(_) | notify::EventKind::Modify(_)
+                ) {
+                    for p in &e.paths {
+                        if p.extension().map(|x| x == "md").unwrap_or(false) {
+                            let _ = tx.send(p.clone());
+                        }
                     }
                 }
             }
-        }
-    });
+        });
     let watcher = match watcher_result {
         Ok(mut w) => {
             let _ = w.watch(&dir_watch, RecursiveMode::Recursive);
@@ -112,6 +141,10 @@ pub fn run() {
     tauri::Builder::default()
         .manage(indexer)
         .manage(engine)
+        .manage(meta)
+        .manage(Arc::new(registry))
+        .manage(Arc::new(routing))
+        .manage(guard_cfg)
         .manage(HoldWatcher(watcher))
         .invoke_handler(tauri::generate_handler![
             commands::ping,
@@ -119,7 +152,12 @@ pub fn run() {
             commands::read_concept,
             commands::save_concept,
             commands::quick_capture,
-            commands::insert_image
+            commands::insert_image,
+            commands::list_suggestions,
+            commands::accept_suggestion,
+            commands::reject_suggestion,
+            commands::rewrite_selection,
+            commands::save_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
