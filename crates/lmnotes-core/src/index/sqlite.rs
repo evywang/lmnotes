@@ -1,7 +1,7 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
 use super::schema::{
-    ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS, CREATE_VEC,
+    create_vec_sql, ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -70,11 +70,9 @@ fn row_from_h(rs: &mut rusqlite::Rows<'_>) -> Result<Option<ConceptRow>> {
 #[async_trait]
 impl IndexBackend for SqliteIndex {
     async fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch(&format!(
-            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_VEC}\n{CREATE_SUGGESTIONS}"
-        ))?;
-        Ok(())
+        // 默认维度 768（Ollama nomic-embed-text）。云端 Provider（如 GLM 1024）应改调
+        // init_schema_with_vec_dim。保留此默认实现以兼容 M1a 测试。
+        self.init_schema_with_vec_dim(768).await
     }
 
     async fn upsert_concept(&self, row: ConceptRow) -> Result<()> {
@@ -280,7 +278,54 @@ impl SqliteIndex {
 
     // ============ 向量层（M1b：embed 写入 sqlite-vec）============
 
-    /// 写入 concept 向量到 vec_concepts（sqlite-vec，768 维）。
+    /// 用指定 embedding 维度初始化 schema。
+    /// 若 vec_concepts 表已存在但维度不匹配（切 Provider 场景），drop + recreate
+    /// （清空向量，下次启动全量 re-embed 由 indexer 触发）。
+    pub async fn init_schema_with_vec_dim(&self, dim: usize) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute_batch(&format!(
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}"
+        ))?;
+        // 检测现有 vec_concepts 维度是否匹配
+        let need_recreate = Self::detect_vec_dim_mismatch(&conn, dim).unwrap_or(true);
+        if need_recreate {
+            // 维度变化或表不存在 → drop（忽略错误，表可能不存在）+ create
+            let _ = conn.execute("DROP TABLE IF EXISTS vec_concepts", []);
+            conn.execute_batch(&create_vec_sql(dim))?;
+        }
+        Ok(())
+    }
+
+    /// 检测现有 vec_concepts 表的 embedding 维度是否与目标 dim 匹配。
+    /// 返回 true 表示需要（重新）创建（维度不符或表不存在）。
+    fn detect_vec_dim_mismatch(conn: &Connection, dim: usize) -> Result<bool> {
+        // sqlite-vec 的 vec0 表 schema 不易直接查维度，用 PRAGMA 或试探。
+        // 简化：尝试插入一个 dim 维向量，失败说明维度不符 → 需重建。
+        // 但插入会污染数据——改用 sqlite_master 查建表 SQL 解析维度。
+        let sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='vec_concepts'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        match sql {
+            None => Ok(true), // 表不存在
+            Some(create_sql) => {
+                // 解析 "float[NNN]"
+                let current = (create_sql.match_indices("float[").next())
+                    .and_then(|(i, _)| create_sql[i..].split('[').nth(1))
+                    .and_then(|s| s.split(']').next())
+                    .and_then(|s| s.parse::<usize>().ok());
+                match current {
+                    Some(d) => Ok(d != dim),
+                    None => Ok(true), // 解析失败，保险起见重建
+                }
+            }
+        }
+    }
+
+    /// 写入 concept 向量到 vec_concepts（sqlite-vec）。
     pub fn upsert_vector(&self, id: &str, embedding: &[f32]) -> crate::Result<()> {
         let conn = self.conn.lock().unwrap();
         let ser: String = format!(

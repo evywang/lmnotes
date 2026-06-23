@@ -58,20 +58,29 @@ async fn end_to_end_pipeline_handles_unreachable_llm() {
     let guard = GuardConfig::default();
 
     let concept =
-        Concept::parse("---\ntype: note\nid: nt_e2e\n---\n\n这是一篇关于 RAG 的笔记。\n")
-            .unwrap();
+        Concept::parse("---\ntype: note\nid: nt_e2e\n---\n\n这是一篇关于 RAG 的笔记。\n").unwrap();
     let text = "这是一篇关于 RAG 的笔记。";
 
-    let result =
-        generate_suggestions(&concept, "notes/rag.md", &sqlite, &reg, &routing, &guard, text)
-            .await;
+    let result = generate_suggestions(
+        &concept,
+        "notes/rag.md",
+        &sqlite,
+        &reg,
+        &routing,
+        &guard,
+        text,
+    )
+    .await;
     assert!(
         result.is_ok(),
         "generate_suggestions should not error even if LLM unreachable"
     );
 
     let pending = sqlite.list_pending_suggestions().unwrap();
-    println!("pending suggestions: {} (expect 0 if Ollama down)", pending.len());
+    println!(
+        "pending suggestions: {} (expect 0 if Ollama down)",
+        pending.len()
+    );
 
     let v = vec![0.0f32; 768];
     let neighbors = sqlite.vector_search(&v, 5).unwrap();

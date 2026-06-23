@@ -64,8 +64,11 @@ pub fn run() {
     // 启动时全量重建（增量，walk_and_index 跳过未变）
     let indexer_boot = indexer.clone();
     let dir_boot = dir.clone();
+    let meta_boot = meta.clone();
+    let embed_dim = llm_config::Config::load_or_default().embed_dim();
     tauri::async_runtime::spawn(async move {
-        let _ = indexer_boot.meta.init_schema().await;
+        // 用 config 的 embed_dim 初始化 schema（维度变化时自动重建 vec 表）
+        let _ = meta_boot.init_schema_with_vec_dim(embed_dim).await;
         let backend = FsBackend::new(&dir_boot);
         let (checked, indexed) = walk_and_index(&indexer_boot, &backend, &dir_boot).await;
         eprintln!("startup index: {checked} checked, {indexed} (re)indexed");

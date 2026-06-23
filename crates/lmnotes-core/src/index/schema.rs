@@ -27,12 +27,20 @@ CREATE INDEX IF NOT EXISTS idx_edges_dst ON edges(dst_id);
 ";
 
 /// sqlite-vec 向量虚拟表（M1b 接 embed 后填充）。
-pub const CREATE_VEC: &str = "
+///
+/// 维度由运行时配置决定（评审修正：原硬编码 768 与 GLM 的 1024 不匹配）。
+/// 不同 Provider 的 embed 维度：Ollama nomic-embed-text=768，GLM Embedding-2=1024，
+/// OpenAI text-embedding-3-large 可配任意 ≤3072。
+pub fn create_vec_sql(dim: usize) -> String {
+    format!(
+        "
 CREATE VIRTUAL TABLE IF NOT EXISTS vec_concepts USING vec0(
     id TEXT PRIMARY KEY,
-    embedding float[768]
+    embedding float[{dim}]
 );
-";
+"
+    )
+}
 
 /// suggestions 表：LLM 建议队列（M1b）。
 pub const CREATE_SUGGESTIONS: &str = "

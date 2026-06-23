@@ -26,6 +26,8 @@ pub enum ProviderConfig {
         base_url: String,
         chat_model: String,
         embed_model: String,
+        #[serde(default = "default_ollama_dim")]
+        embed_dim: usize,
     },
     #[serde(rename = "openai")]
     OpenAi {
@@ -34,7 +36,26 @@ pub enum ProviderConfig {
         api_key: String,
         chat_model: String,
         embed_model: String,
+        #[serde(default = "default_openai_dim")]
+        embed_dim: usize,
     },
+}
+
+fn default_ollama_dim() -> usize {
+    768
+}
+fn default_openai_dim() -> usize {
+    1024
+}
+
+impl ProviderConfig {
+    /// 取该 Provider 的 embedding 维度。
+    pub fn embed_dim(&self) -> usize {
+        match self {
+            ProviderConfig::Ollama { embed_dim, .. } => *embed_dim,
+            ProviderConfig::OpenAi { embed_dim, .. } => *embed_dim,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,6 +88,7 @@ impl Default for Config {
                 base_url: "http://localhost:11434".into(),
                 chat_model: "qwen2.5:7b".into(),
                 embed_model: "nomic-embed-text".into(),
+                embed_dim: 768,
             }],
             routing: RoutingConfig {
                 summarize: Some(ProviderRefSer {
@@ -116,6 +138,25 @@ impl Config {
         let text = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         std::fs::write(&path, text).map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// 取当前配置的 embedding 维度（从 Embed 任务路由的 Provider 取）。
+    /// 若路由未配，取第一个 Provider 的维度；都没有则默认 768。
+    pub fn embed_dim(&self) -> usize {
+        if let Some(embed_ref) = &self.routing.embed {
+            // 找匹配 id 的 provider
+            for p in &self.providers {
+                let pid = match p {
+                    ProviderConfig::Ollama { .. } => "ollama",
+                    ProviderConfig::OpenAi { id, .. } => id.as_str(),
+                };
+                if pid == embed_ref.provider {
+                    return p.embed_dim();
+                }
+            }
+        }
+        // fallback: 第一个 provider 的 dim，或 768
+        self.providers.first().map(|p| p.embed_dim()).unwrap_or(768)
     }
 
     /// 映射到核心层的 Registry + Routing + GuardConfig。
