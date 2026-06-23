@@ -264,3 +264,45 @@ body {
   color: var(--bg);
   border-color: #f38ba8;
 }
+
+/* 就地改写菜单 */
+.rewrite-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+.rewrite-menu {
+  position: fixed;
+  z-index: 100;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 140px;
+}
+.rewrite-busy {
+  padding: 0.4rem 0.6rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+}
+.rewrite-action {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.rewrite-action:hover:not(:disabled) {
+  background: var(--hover);
+}
+.rewrite-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -1,6 +1,7 @@
 import { createSignal, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { useCodeMirror } from "./solid-cm";
+import { RewriteMenu } from "./RewriteMenu";
 import type { EditorView } from "@codemirror/view";
 
 interface ConceptFile {
@@ -89,6 +90,17 @@ export function Editor(props: { path: string }) {
           onDragOver={(e) => e.preventDefault()}
         />
       </Show>
+      <RewriteMenu
+        view={viewGetter}
+        conceptPath={props.path}
+        onSaveSnapshot={async (text) => {
+          try {
+            await invoke("save_snapshot", { conceptPath: props.path, text });
+          } catch (e) {
+            console.error("save_snapshot failed", e);
+          }
+        }}
+      />
     </div>
   );
 }
