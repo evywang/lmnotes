@@ -277,6 +277,50 @@ impl SqliteIndex {
         )?;
         Ok(())
     }
+
+    // ============ 向量层（M1b：embed 写入 sqlite-vec）============
+
+    /// 写入 concept 向量到 vec_concepts（sqlite-vec，768 维）。
+    pub fn upsert_vector(&self, id: &str, embedding: &[f32]) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let ser: String = format!(
+            "[{}]",
+            embedding
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        conn.execute(
+            "INSERT OR REPLACE INTO vec_concepts (id, embedding) VALUES (?1, ?2)",
+            rusqlite::params![id, ser],
+        )?;
+        Ok(())
+    }
+
+    /// KNN 向量检索，返回 (id, distance) 列表。
+    pub fn vector_search(&self, q: &[f32], k: usize) -> crate::Result<Vec<(String, f32)>> {
+        let conn = self.conn.lock().unwrap();
+        let ser = format!(
+            "[{}]",
+            q.iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        let sql = format!(
+            "SELECT id, distance FROM vec_concepts WHERE embedding MATCH ?1 ORDER BY distance LIMIT {k}"
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map([&ser], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, f32>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
 }
 
 #[cfg(test)]
