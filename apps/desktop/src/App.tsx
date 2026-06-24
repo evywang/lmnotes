@@ -21,7 +21,7 @@ export function App() {
       e.preventDefault();
       setSettingsOpen(true);
     }
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
       e.preventDefault();
       setChatOpen(true);
     }
@@ -40,6 +40,9 @@ export function App() {
             onInput={(e) => setQuery(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && runSearch(query())}
           />
+          <button class="chat-btn" onClick={() => setChatOpen(true)}>
+            💬 Chat with Vault (Ctrl+J)
+          </button>
           <Show when={searching()}>
             <p class="muted">搜索中…</p>
           </Show>

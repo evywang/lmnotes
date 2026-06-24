@@ -44,6 +44,9 @@ pub fn run() {
     let indexer = Arc::new(Indexer::new(meta.clone(), fulltext.clone()));
     let engine = Arc::new(SearchEngine::new(meta.clone(), fulltext.clone()));
     let (registry, routing, guard_cfg) = build_registry_from_config();
+    let registry = Arc::new(registry);
+    let routing = Arc::new(routing);
+    let guard_cfg = Arc::new(guard_cfg);
 
     // 首启探测：检测 Provider 健康，不可用时日志提示（O6c）
     tauri::async_runtime::spawn(async {
@@ -105,6 +108,10 @@ pub fn run() {
     if watcher.is_some() {
         let indexer_consumer = indexer_watch.clone();
         let dir_consumer = dir_watch.clone();
+        let sqlite_watch = meta.clone();
+        let reg_watch = registry.clone();
+        let routing_watch = routing.clone();
+        let guard_watch = guard_cfg.clone();
         tauri::async_runtime::spawn(async move {
             while let Ok(p) = rx.recv() {
                 if let Ok(rel) = p.strip_prefix(&dir_consumer) {
@@ -117,6 +124,23 @@ pub fn run() {
                                 {
                                     eprintln!("watch index fail {rel}: {e}");
                                 }
+                                // 也触发 LLM 建议生成
+                                let text_c = text.clone();
+                                let rel_c = rel.clone();
+                                let sqlite_c = sqlite_watch.clone();
+                                let reg_c = reg_watch.clone();
+                                let routing_c = routing_watch.clone();
+                                let guard_c = guard_watch.clone();
+                                tauri::async_runtime::spawn(async move {
+                                    if let Err(e) = lmnotes_core::indexer::generate_suggestions(
+                                        &c, &rel_c, &sqlite_c, &reg_c, &routing_c, &guard_c,
+                                        &text_c,
+                                    )
+                                    .await
+                                    {
+                                        eprintln!("watch suggestion fail {rel_c}: {e}");
+                                    }
+                                });
                             }
                             Err(e) => eprintln!("watch parse skip {rel}: {e}"),
                         },
@@ -133,9 +157,9 @@ pub fn run() {
         .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
         .manage(meta)
         .manage(fulltext)
-        .manage(Arc::new(registry))
-        .manage(Arc::new(routing))
-        .manage(guard_cfg)
+        .manage(registry.clone())
+        .manage(routing.clone())
+        .manage(guard_cfg.clone())
         .manage(HoldWatcher(watcher))
         .invoke_handler(tauri::generate_handler![
             commands::ping,

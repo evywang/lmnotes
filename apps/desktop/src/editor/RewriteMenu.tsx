@@ -1,4 +1,4 @@
-import { createSignal, For, Show } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { EditorView } from "@codemirror/view";
 
@@ -63,21 +63,20 @@ export function RewriteMenu(props: {
     return true; // consumed
   };
 
-  // 把 onContextMenu 暴露出去（Editor 通过 ref 调用）
-  // 用全局事件简单处理：Editor 不直接调，而是这个组件监听 contextmenu
-  // 这里用 document 级监听 + 判断点击是否在编辑器内
-  let initialized = false;
-  if (!initialized) {
-    initialized = true;
-    document.addEventListener("contextmenu", (e) => {
+  // document 级 contextmenu 监听（onMount 确保只注册一次）
+  onMount(() => {
+    const handler = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest(".cm-host")) {
+      // CodeMirror 渲染在 .cm-host > .cm-editor 内，检查两者
+      if (target.closest(".cm-editor") || target.closest(".cm-host")) {
         if (onContextMenu(e)) {
           e.preventDefault();
         }
       }
-    });
-  }
+    };
+    document.addEventListener("contextmenu", handler);
+    onCleanup(() => document.removeEventListener("contextmenu", handler));
+  });
 
   return (
     <Show when={menuPos()}>
