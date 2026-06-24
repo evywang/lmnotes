@@ -1,5 +1,7 @@
 //! Tauri 命令定义。M1a/M1b 逐步填充。
 
+use lmnotes_core::backend::IndexBackend;
+use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
 use lmnotes_core::indexer::Indexer;
 use lmnotes_core::llm::guard::{check, GuardConfig, GuardDecision};
@@ -10,7 +12,7 @@ use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::State;
+use tauri::{Emitter, State};
 
 #[tauri::command]
 pub fn ping() -> &'static str {
@@ -302,4 +304,105 @@ pub async fn probe_providers(
 pub struct ProviderHealth {
     pub provider_id: String,
     pub healthy: bool,
+}
+
+// ============ Chat with Vault（T4）============
+
+#[derive(serde::Serialize, Clone)]
+pub struct CitationRefDto {
+    pub index: usize,
+    pub concept_id: String,
+    pub path: String,
+}
+
+/// Chat with Vault：向量+全文检索 → 拼上下文 → LLM 流式回答 → 引用。
+/// 流式 chunk 通过 Tauri event "chat-chunk" 推前端，返回引用列表。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn chat_stream(
+    query: String,
+    window: tauri::WebviewWindow,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    meta: State<'_, Arc<dyn IndexBackend>>,
+    fulltext: State<'_, Arc<TantivyIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, GuardConfig>,
+) -> Result<Vec<CitationRefDto>, String> {
+    use lmnotes_core::llm::guard::{check as guard_check, GuardDecision};
+    use lmnotes_core::llm::routing::Task;
+    use lmnotes_core::qa::context::build_context;
+    use lmnotes_core::qa::prompt::SYSTEM;
+    use lmnotes_core::qa::retriever::Retriever;
+
+    // 1. 取 embed provider
+    let (embedder, embed_model) = registry
+        .embed_for(&routing, Task::Embed)
+        .map_err(|e| e.to_string())?;
+
+    // 2. 检索
+    let retriever = Retriever::new(
+        meta.inner().clone(),
+        fulltext.inner().clone(),
+        sqlite.inner().clone(),
+        embedder,
+        embed_model,
+    );
+    let chunks = retriever
+        .retrieve(&query, 5)
+        .await
+        .map_err(|e| e.to_string())?;
+    let (ctx, citations) = build_context(&chunks, 6000);
+
+    // 3. 取 chat provider
+    let (chat, model) = registry
+        .chat_for(&routing, Task::Chat)
+        .map_err(|e| e.to_string())?;
+
+    // 4. 护栏检查
+    let full_input = format!("{SYSTEM}\n\n【上下文】\n{ctx}\n\n【问题】\n{query}");
+    match guard_check(&guard_cfg, chat.kind(), &full_input, false) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+
+    // 5. 流式 chat（推送 chunk 到前端）
+    let req = lmnotes_core::llm::ChatRequest {
+        model,
+        messages: vec![
+            lmnotes_core::llm::ChatMessage {
+                role: lmnotes_core::llm::ChatRole::System,
+                content: format!("{SYSTEM}\n\n【上下文】\n{ctx}"),
+            },
+            lmnotes_core::llm::ChatMessage {
+                role: lmnotes_core::llm::ChatRole::User,
+                content: query,
+            },
+        ],
+        temperature: Some(0.4),
+    };
+
+    use futures_util::StreamExt;
+    let mut stream = chat.chat_stream(req).await.map_err(|e| e.to_string())?;
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(text) => {
+                let _ = window.emit("chat-chunk", &text);
+            }
+            Err(e) => {
+                let _ = window.emit("chat-error", e.to_string());
+            }
+        }
+    }
+
+    // 6. 返回引用列表
+    let cite_dtos = citations
+        .into_iter()
+        .map(|c| CitationRefDto {
+            index: c.index,
+            concept_id: c.concept_id,
+            path: c.path,
+        })
+        .collect();
+    Ok(cite_dtos)
 }

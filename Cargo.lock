@@ -2409,6 +2409,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dirs 5.0.1",
+ "futures-util",
  "hex",
  "lmnotes-core",
  "notify",

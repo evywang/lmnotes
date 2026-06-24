@@ -130,7 +130,9 @@ pub fn run() {
     tauri::Builder::default()
         .manage(indexer)
         .manage(engine)
+        .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
         .manage(meta)
+        .manage(fulltext)
         .manage(Arc::new(registry))
         .manage(Arc::new(routing))
         .manage(guard_cfg)
@@ -149,7 +151,8 @@ pub fn run() {
             commands::save_snapshot,
             commands::get_config,
             commands::set_config,
-            commands::probe_providers
+            commands::probe_providers,
+            commands::chat_stream
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

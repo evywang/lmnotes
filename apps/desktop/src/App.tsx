@@ -4,11 +4,13 @@ import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
+import { ChatDrawer } from "./chat/ChatDrawer";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
+  const [chatOpen, setChatOpen] = createSignal(false);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
@@ -18,6 +20,10 @@ export function App() {
     if ((e.ctrlKey || e.metaKey) && e.key === ",") {
       e.preventDefault();
       setSettingsOpen(true);
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "j") {
+      e.preventDefault();
+      setChatOpen(true);
     }
   };
   window.addEventListener("keydown", onKeyDown);
@@ -75,6 +81,12 @@ export function App() {
       </Show>
       <Show when={settingsOpen()}>
         <ProviderSettings onClose={() => setSettingsOpen(false)} />
+      </Show>
+      <Show when={chatOpen()}>
+        <ChatDrawer
+          onClose={() => setChatOpen(false)}
+          onNavigate={(path) => setActivePath(path)}
+        />
       </Show>
     </>
   );

@@ -423,3 +423,118 @@ body {
 .btn-secondary:hover {
   background: var(--hover);
 }
+
+/* Chat with Vault 抽屉 */
+.chat-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 420px;
+  height: 100vh;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.2);
+}
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.chat-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.chat-close {
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+.chat-close:hover {
+  background: var(--hover);
+}
+.chat-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+}
+.chat-answer {
+  line-height: 1.6;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+}
+.cite-chip {
+  display: inline;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  vertical-align: super;
+}
+.cite-chip:hover {
+  opacity: 0.8;
+}
+.chat-error {
+  color: #f38ba8;
+  font-size: 0.85rem;
+  padding: 0.5rem;
+}
+.chat-citations {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.cite-ref {
+  display: block;
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-align: left;
+  padding: 0.2rem 0;
+  font-size: 0.8rem;
+  font-family: ui-monospace, monospace;
+}
+.cite-ref:hover {
+  text-decoration: underline;
+}
+.chat-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.chat-input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.chat-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.chat-streaming {
+  color: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
