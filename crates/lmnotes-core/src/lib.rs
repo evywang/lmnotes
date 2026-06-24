@@ -9,6 +9,7 @@ pub mod index;
 pub mod indexer;
 pub mod llm;
 pub mod okf;
+pub mod qa;
 pub mod search;
 pub mod vault;
 
