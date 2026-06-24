@@ -45,7 +45,7 @@ impl LlmProvider for OpenAiProvider {
         Capabilities::CHAT | Capabilities::EMBED
     }
     async fn health(&self) -> Result<bool> {
-        let url = format!("{}/v1/models", self.base_url);
+        let url = format!("{}/models", self.base_url);
         let r = self
             .client
             .get(&url)
@@ -89,7 +89,7 @@ impl ChatCap for OpenAiProvider {
         &self,
         req: ChatRequest,
     ) -> Result<Box<dyn futures_util::Stream<Item = Result<String>> + Send + Unpin>> {
-        let url = format!("{}/v1/chat/completions", self.base_url);
+        let url = format!("{}/chat/completions", self.base_url);
         let body = ChatBody {
             model: req.model,
             messages: req
@@ -130,18 +130,40 @@ impl ChatCap for OpenAiProvider {
                                 if let Some(content) =
                                     c.choices.into_iter().next().and_then(|ch| ch.delta.content)
                                 {
-                                    return Some((Ok(content), (bytes, buf)));
+                                    if !content.is_empty() {
+                                        return Some((Ok(content), (bytes, buf)));
+                                    }
                                 }
                             }
                         }
                         continue;
                     }
                     match bytes.next().await {
-                        Some(Ok(chunk)) => buf.push_str(&String::from_utf8_lossy(&chunk)),
+                        Some(Ok(chunk)) => {
+                            buf.push_str(&String::from_utf8_lossy(&chunk));
+                        }
                         Some(Err(e)) => {
                             return Some((Err(crate::CoreError::Http(e)), (bytes, buf)))
                         }
-                        None => return None,
+                        None => {
+                            // 流尽：尝试解析 buf 中残余的最后一行
+                            if buf.trim().is_empty() {
+                                return None;
+                            }
+                            let line = std::mem::take(&mut buf);
+                            if let Some(json) = line.trim().strip_prefix("data: ") {
+                                if let Ok(c) = serde_json::from_str::<ChatChunk>(json) {
+                                    if let Some(content) =
+                                        c.choices.into_iter().next().and_then(|ch| ch.delta.content)
+                                    {
+                                        if !content.is_empty() {
+                                            return Some((Ok(content), (bytes, buf)));
+                                        }
+                                    }
+                                }
+                            }
+                            return None;
+                        }
                     }
                 }
             },
@@ -162,14 +184,16 @@ struct EmbedResp {
 }
 #[derive(Deserialize)]
 struct EmbedItem {
-    embedding: Vec<f32>,
+    // 用 f64 反序列化（GLM 返回的科学计数法如 9.4E-13 用大写 E，f32 可能拒绝），
+    // 反序列化后转 f32（sqlite-vec 存储）
+    embedding: Vec<f64>,
 }
 
 #[async_trait]
 impl EmbedCap for OpenAiProvider {
     async fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>> {
-        let url = format!("{}/v1/embeddings", self.base_url);
-        let r: EmbedResp = self
+        let url = format!("{}/embeddings", self.base_url);
+        let resp = self
             .client
             .post(&url)
             .bearer_auth(&self.api_key)
@@ -178,10 +202,16 @@ impl EmbedCap for OpenAiProvider {
                 input: texts.to_vec(),
             })
             .send()
-            .await?
-            .json()
             .await?;
-        Ok(r.data.into_iter().map(|i| i.embedding).collect())
+        // 用 text() + from_str 而非 json()，便于定位反序列化失败的具体原因
+        let body = resp.text().await?;
+        let r: EmbedResp = serde_json::from_str(&body).map_err(|e| {
+            crate::CoreError::Conformance(format!("embed decode: {e} (body len={})", body.len()))
+        })?;
+        Ok(r.data
+            .into_iter()
+            .map(|i| i.embedding.into_iter().map(|x| x as f32).collect())
+            .collect())
     }
 }
 
@@ -195,7 +225,7 @@ mod tests {
     async fn chat_stream_parses_sse() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/chat/completions"))
+            .and(path("/chat/completions"))
             .and(header("authorization", "Bearer test-key"))
             .respond_with(ResponseTemplate::new(200).set_body_string(
                 "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n\
