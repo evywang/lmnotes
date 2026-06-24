@@ -57,6 +57,17 @@ CREATE INDEX IF NOT EXISTS idx_sugg_concept ON suggestions(concept_id);
 CREATE INDEX IF NOT EXISTS idx_sugg_status ON suggestions(status);
 ";
 
+/// chat_history 表：Chat with Vault 对话历史（M1c 增强）。
+pub const CREATE_CHAT_HISTORY: &str = "
+CREATE TABLE IF NOT EXISTS chat_history (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    citations   TEXT,
+    created_at  INTEGER NOT NULL
+);
+";
+
 #[derive(Debug, Clone)]
 pub struct ConceptRow {
     pub id: String,

@@ -176,7 +176,9 @@ pub fn run() {
             commands::get_config,
             commands::set_config,
             commands::probe_providers,
-            commands::chat_stream
+            commands::chat_stream,
+            commands::load_chat_history,
+            commands::clear_chat_history
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

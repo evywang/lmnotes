@@ -1,7 +1,8 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
 use super::schema::{
-    create_vec_sql, ConceptRow, EdgeRow, CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS,
+    create_vec_sql, ConceptRow, EdgeRow, CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES,
+    CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -284,7 +285,7 @@ impl SqliteIndex {
     pub async fn init_schema_with_vec_dim(&self, dim: usize) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!(
-            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}"
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}"
         ))?;
         // 检测现有 vec_concepts 维度是否匹配
         let need_recreate = Self::detect_vec_dim_mismatch(&conn, dim).unwrap_or(true);
@@ -366,8 +367,56 @@ impl SqliteIndex {
         }
         Ok(out)
     }
+
+    // ============ Chat History（M1c 增强：多轮对话持久化）============
+
+    pub fn append_chat_history(
+        &self,
+        role: &str,
+        content: &str,
+        citations: Option<&str>,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO chat_history (role, content, citations, created_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![role, content, citations, Self::now_secs()],
+        )?;
+        Ok(())
+    }
+
+    pub fn load_chat_history(&self) -> crate::Result<Vec<ChatHistoryRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT id, role, content, citations FROM chat_history ORDER BY id ASC")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ChatHistoryRow {
+                id: r.get(0)?,
+                role: r.get(1)?,
+                content: r.get(2)?,
+                citations: r.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn clear_chat_history(&self) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM chat_history", [])?;
+        Ok(())
+    }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ChatHistoryRow {
+    pub id: i64,
+    pub role: String,
+    pub content: String,
+    pub citations: Option<String>,
+}
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -3,7 +3,7 @@
 use super::retriever::RetrievedChunk;
 
 /// 引用编号引用。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct CitationRef {
     pub index: usize,
     pub concept_id: String,

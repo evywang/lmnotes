@@ -316,11 +316,12 @@ pub struct CitationRefDto {
 }
 
 /// Chat with Vault：向量+全文检索 → 拼上下文 → LLM 流式回答 → 引用。
-/// 流式 chunk 通过 Tauri event "chat-chunk" 推前端，返回引用列表。
+/// 携带对话历史（多轮），历史持久化到 chat_history 表。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn chat_stream(
     query: String,
+    history: Vec<HistoryMsg>,
     window: tauri::WebviewWindow,
     sqlite: State<'_, Arc<SqliteIndex>>,
     meta: State<'_, Arc<dyn IndexBackend>>,
@@ -334,6 +335,9 @@ pub async fn chat_stream(
     use lmnotes_core::qa::context::build_context;
     use lmnotes_core::qa::prompt::SYSTEM;
     use lmnotes_core::qa::retriever::Retriever;
+
+    // 存用户消息到历史
+    let _ = sqlite.append_chat_history("user", &query, None);
 
     // 1. 取 embed provider
     let (embedder, embed_model) = registry
@@ -366,27 +370,36 @@ pub async fn chat_stream(
         GuardDecision::Deny(reason) => return Err(reason),
     }
 
-    // 5. 流式 chat（推送 chunk 到前端）
+    // 5. 构建 messages：system（含 context）+ 历史（最近 20 条）+ 当前 query
+    let mut messages = vec![lmnotes_core::llm::ChatMessage {
+        role: lmnotes_core::llm::ChatRole::System,
+        content: format!("{SYSTEM}\n\n【上下文】\n{ctx}"),
+    }];
+    for h in history.iter().rev().take(20).rev() {
+        messages.push(lmnotes_core::llm::ChatMessage {
+            role: match h.role.as_str() {
+                "user" => lmnotes_core::llm::ChatRole::User,
+                "assistant" => lmnotes_core::llm::ChatRole::Assistant,
+                _ => lmnotes_core::llm::ChatRole::User,
+            },
+            content: h.content.clone(),
+        });
+    }
+
     let req = lmnotes_core::llm::ChatRequest {
         model,
-        messages: vec![
-            lmnotes_core::llm::ChatMessage {
-                role: lmnotes_core::llm::ChatRole::System,
-                content: format!("{SYSTEM}\n\n【上下文】\n{ctx}"),
-            },
-            lmnotes_core::llm::ChatMessage {
-                role: lmnotes_core::llm::ChatRole::User,
-                content: query,
-            },
-        ],
+        messages,
         temperature: Some(0.4),
     };
 
+    // 6. 流式 chat（推送 chunk 到前端）
     use futures_util::StreamExt;
     let mut stream = chat.chat_stream(req).await.map_err(|e| e.to_string())?;
+    let mut full_answer = String::new();
     while let Some(chunk) = stream.next().await {
         match chunk {
             Ok(text) => {
+                full_answer.push_str(&text);
                 let _ = window.emit("chat-chunk", &text);
             }
             Err(e) => {
@@ -395,7 +408,14 @@ pub async fn chat_stream(
         }
     }
 
-    // 6. 返回引用列表
+    // 7. 存回答到历史 + 返回引用
+    let cite_json = if citations.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(&citations).unwrap_or_default())
+    };
+    let _ = sqlite.append_chat_history("assistant", &full_answer, cite_json.as_deref());
+
     let cite_dtos = citations
         .into_iter()
         .map(|c| CitationRefDto {
@@ -405,4 +425,24 @@ pub async fn chat_stream(
         })
         .collect();
     Ok(cite_dtos)
+}
+
+#[derive(serde::Deserialize)]
+pub struct HistoryMsg {
+    pub role: String,
+    pub content: String,
+}
+
+/// 加载历史对话记录。
+#[tauri::command]
+pub fn load_chat_history(
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<lmnotes_core::index::sqlite::ChatHistoryRow>, String> {
+    sqlite.load_chat_history().map_err(|e| e.to_string())
+}
+
+/// 清空历史对话记录。
+#[tauri::command]
+pub fn clear_chat_history(sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
+    sqlite.clear_chat_history().map_err(|e| e.to_string())
 }
