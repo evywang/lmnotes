@@ -1,4 +1,6 @@
 import { For, Show, createSignal, onCleanup } from "solid-js";
+import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
@@ -29,6 +31,33 @@ export function App() {
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 
+  const createNote = async () => {
+    const title = window.prompt("笔记标题：", "新笔记");
+    if (!title) return;
+    try {
+      const path = await invoke<string>("create_note", { title });
+      setActivePath(path);
+      runSearch("");
+    } catch (e) {
+      console.error("create note", e);
+    }
+  };
+
+  const importNote = async () => {
+    const selected = await open({
+      multiple: false,
+      filters: [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }],
+    });
+    if (!selected || typeof selected !== "string") return;
+    try {
+      const path = await invoke<string>("import_note", { filePath: selected });
+      setActivePath(path);
+      runSearch("");
+    } catch (e) {
+      console.error("import note", e);
+    }
+  };
+
   return (
     <>
       <div class="layout">
@@ -40,6 +69,14 @@ export function App() {
             onInput={(e) => setQuery(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && runSearch(query())}
           />
+          <div class="sidebar-actions">
+            <button class="action-btn" onClick={createNote} title="新建笔记">
+              + 新建
+            </button>
+            <button class="action-btn" onClick={importNote} title="导入 .md 文件">
+              📥 导入
+            </button>
+          </div>
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
             💬 Chat with Vault (Ctrl+J)
           </button>

@@ -83,6 +83,26 @@ body {
 .chat-btn:hover {
   opacity: 0.9;
 }
+
+.sidebar-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.action-btn {
+  flex: 1;
+  padding: 0.4rem;
+  background: none;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: inherit;
+}
+.action-btn:hover {
+  background: var(--hover);
+}
 .result-list {
   list-style: none;
   padding: 0;

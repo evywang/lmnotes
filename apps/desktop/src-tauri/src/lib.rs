@@ -152,6 +152,7 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(indexer)
         .manage(engine)
         .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
@@ -178,7 +179,9 @@ pub fn run() {
             commands::probe_providers,
             commands::chat_stream,
             commands::load_chat_history,
-            commands::clear_chat_history
+            commands::clear_chat_history,
+            commands::create_note,
+            commands::import_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

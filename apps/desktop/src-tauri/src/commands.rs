@@ -446,3 +446,109 @@ pub fn load_chat_history(
 pub fn clear_chat_history(sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
     sqlite.clear_chat_history().map_err(|e| e.to_string())
 }
+
+// ============ 新建 + 导入笔记 ============
+
+/// 新建笔记：创建带 frontmatter 的空 concept，返回相对路径。
+#[tauri::command]
+pub async fn create_note(title: String, parent_dir: Option<String>) -> Result<String, String> {
+    use chrono::Utc;
+    let dir = parent_dir.unwrap_or_else(|| "notes".into());
+    let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+    // 文件名：标题转 safe slug + id 后缀避免重名
+    let slug: String = title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        id.rsplit_once('_')
+            .map(|(_, s)| s)
+            .unwrap_or("untitled")
+            .to_string()
+    } else {
+        slug
+    };
+    let date = Utc::now().format("%Y%m%d").to_string();
+    let path = format!("{dir}/{slug}-{date}.md");
+    let content = format!(
+        "---\ntype: note\nid: {id}\ntitle: {title}\ncreated: {ts}\n---\n\n# {title}\n\n",
+        id = id,
+        title = title,
+        ts = Utc::now().format("%Y-%m-%dT%H:%M:%S+08:00")
+    );
+    let full = vault_root().join(&path);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// 导入 .md 文件：把外部文件复制到 vault，自动生成 frontmatter（若无）。
+/// file_path 是用户系统的绝对路径。
+#[tauri::command]
+pub async fn import_note(file_path: String) -> Result<String, String> {
+    use chrono::Utc;
+    let src = std::path::PathBuf::from(&file_path);
+    let name = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "imported".into());
+    let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+    let date = Utc::now().format("%Y%m%d").to_string();
+
+    // 读源文件
+    let raw = tokio::fs::read_to_string(&src)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 检查是否有 frontmatter（以 --- 开头）
+    let content = if raw.trim_start().starts_with("---") {
+        // 已有 frontmatter，直接用（但补 id 若无）
+        if raw.contains("id:") {
+            raw
+        } else {
+            // 在第一个 --- 后插入 id
+            raw.replacen("---\n", &format!("---\nid: {id}\n"), 1)
+        }
+    } else {
+        // 无 frontmatter，生成
+        format!(
+            "---\ntype: note\nid: {id}\ntitle: {name}\ncreated: {ts}\n---\n\n{raw}",
+            id = id,
+            name = name,
+            ts = Utc::now().format("%Y-%m-%dT%H:%M:%S+08:00"),
+            raw = raw
+        )
+    };
+
+    // 目标路径
+    let slug: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        "imported".into()
+    } else {
+        slug
+    };
+    let path = format!("notes/{slug}-{date}.md");
+    let full = vault_root().join(&path);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
