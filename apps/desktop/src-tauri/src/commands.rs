@@ -58,7 +58,7 @@ pub async fn save_concept(
     sqlite: State<'_, Arc<SqliteIndex>>,
     registry: State<'_, Arc<Registry>>,
     routing: State<'_, Arc<Routing>>,
-    guard_cfg: State<'_, GuardConfig>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
 ) -> Result<(), String> {
     let full = vault_root().join(&path);
     if let Some(p) = full.parent() {
@@ -199,7 +199,7 @@ pub async fn rewrite_selection(
     selection: String,
     registry: State<'_, Arc<Registry>>,
     routing: State<'_, Arc<Routing>>,
-    guard_cfg: State<'_, GuardConfig>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
 ) -> Result<String, String> {
     let (chat, model) = registry
         .chat_for(&routing, Task::Rewrite)
@@ -328,7 +328,7 @@ pub async fn chat_stream(
     fulltext: State<'_, Arc<TantivyIndex>>,
     registry: State<'_, Arc<Registry>>,
     routing: State<'_, Arc<Routing>>,
-    guard_cfg: State<'_, GuardConfig>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
 ) -> Result<Vec<CitationRefDto>, String> {
     use lmnotes_core::llm::guard::{check as guard_check, GuardDecision};
     use lmnotes_core::llm::routing::Task;
