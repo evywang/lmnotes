@@ -28,6 +28,11 @@ pub struct SearchHit {
 // 注：jieba-rs 官方推荐的适配器 tantivy-jieba 0.20 需要 tantivy 0.26+，
 // 与本项目用的 tantivy 0.22 不兼容（tokenizer_api 版本 0.3 vs 0.7 冲突）。
 // 升级 tantivy 至 0.26+ 后可切换到 tantivy-jieba 删除本适配器。
+//
+// 已知限制：jieba Default 模式把"注意力"切成整体 token，搜"注意"匹配不到。
+// 搜索使用 QueryParser 直接传 query（jieba 二次分词后精确匹配）。
+// 改善方案（未来）：用 Search 模式建索引（产生重叠 token），或升级到
+// 支持 ngram 的分词方案。当前 MVP 接受此限制。
 
 /// jieba 分词适配 Tantivy Tokenizer。
 ///
