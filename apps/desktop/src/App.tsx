@@ -46,11 +46,13 @@ export function App() {
   const importNote = async () => {
     const selected = await open({
       multiple: false,
-      filters: [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }],
+      filters: [
+        { name: "文档", extensions: ["md", "markdown", "txt", "pdf", "docx", "xlsx", "xls"] },
+      ],
     });
     if (!selected || typeof selected !== "string") return;
     try {
-      const path = await invoke<string>("import_note", { filePath: selected });
+      const path = await invoke<string>("import_document", { filePath: selected });
       setActivePath(path);
       runSearch("");
     } catch (e) {

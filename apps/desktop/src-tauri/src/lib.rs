@@ -181,7 +181,8 @@ pub fn run() {
             commands::load_chat_history,
             commands::clear_chat_history,
             commands::create_note,
-            commands::import_note
+            commands::import_note,
+            commands::import_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

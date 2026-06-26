@@ -1,4 +1,9 @@
 //! Tauri 命令定义。M1a/M1b 逐步填充。
+//!
+//! 文件 IO 用 std::fs/tokio::fs（Tauri 壳层，非核心库业务模块）。
+//! 豁免 clippy.toml 的 std::fs 约束。
+
+#![allow(clippy::disallowed_methods)]
 
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::index::tantivy::TantivyIndex;
@@ -551,4 +556,209 @@ pub async fn import_note(file_path: String) -> Result<String, String> {
         .await
         .map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+/// 多格式导入：PDF/DOCX/XLSX/TXT/MD → Markdown，写入 vault。
+#[tauri::command]
+pub async fn import_document(file_path: String) -> Result<String, String> {
+    use chrono::Utc;
+    let src = std::path::PathBuf::from(&file_path);
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let name = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "imported".into());
+    let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+    let date = Utc::now().format("%Y%m%d").to_string();
+
+    let body = match ext.as_str() {
+        "md" | "markdown" | "txt" => tokio::fs::read_to_string(&src)
+            .await
+            .map_err(|e| e.to_string())?,
+        "pdf" => convert_pdf(&src)?,
+        "docx" => convert_docx(&src)?,
+        "xlsx" | "xls" => convert_xlsx(&src)?,
+        _ => {
+            return Err(format!(
+                "不支持的格式: .{ext}（支持: pdf, docx, xlsx, txt, md）"
+            ))
+        }
+    };
+
+    let content = if body.trim_start().starts_with("---") {
+        if body.contains("id:") {
+            body
+        } else {
+            body.replacen("---\n", &format!("---\nid: {id}\n"), 1)
+        }
+    } else {
+        format!(
+            "---\ntype: note\nid: {id}\ntitle: {name}\ncreated: {ts}\n---\n\n{body}",
+            ts = Utc::now().format("%Y-%m-%dT%H:%M:%S+08:00")
+        )
+    };
+
+    let slug: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        "imported".into()
+    } else {
+        slug
+    };
+    let path = format!("notes/{slug}-{date}.md");
+    let full = vault_root().join(&path);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// PDF → text（best-effort）
+fn convert_pdf(path: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let text = pdf_extract::extract_text_from_mem(&bytes).map_err(|e| e.to_string())?;
+    Ok(text
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n"))
+}
+
+/// DOCX → Markdown
+fn convert_docx(path: &std::path::Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let docx = docx_rs::read_docx(&bytes).map_err(|e| e.to_string())?;
+    let mut md = String::new();
+    for child in &docx.document.children {
+        match child {
+            docx_rs::DocumentChild::Paragraph(para) => {
+                let text = collect_para_text(para);
+                if !text.is_empty() {
+                    md.push_str(&text);
+                    md.push_str("\n\n");
+                }
+            }
+            docx_rs::DocumentChild::Table(table) => {
+                md.push_str(&convert_docx_table(table));
+                md.push_str("\n\n");
+            }
+            _ => {}
+        }
+    }
+    Ok(md.trim().to_string())
+}
+
+fn collect_para_text(para: &docx_rs::Paragraph) -> String {
+    let mut text = String::new();
+    for child in &para.children {
+        if let docx_rs::ParagraphChild::Run(run) = child {
+            for rc in &run.children {
+                if let docx_rs::RunChild::Text(t) = rc {
+                    text.push_str(&t.text);
+                }
+            }
+        }
+    }
+    text
+}
+
+fn convert_docx_table(table: &docx_rs::Table) -> String {
+    if table.rows.is_empty() {
+        return String::new();
+    }
+    let mut md = String::new();
+    for (i, row_child) in table.rows.iter().enumerate() {
+        let docx_rs::TableChild::TableRow(row) = row_child;
+        let cells: Vec<String> = row
+            .cells
+            .iter()
+            .map(|c| {
+                let docx_rs::TableRowChild::TableCell(cell) = c;
+                let mut t = String::new();
+                for content in &cell.children {
+                    if let docx_rs::TableCellContent::Paragraph(p) = content {
+                        t.push_str(&collect_para_text(p));
+                    }
+                }
+                t
+            })
+            .collect();
+        md.push_str("| ");
+        md.push_str(&cells.join(" | "));
+        md.push_str(" |\n");
+        if i == 0 {
+            md.push_str("| ");
+            md.push_str(&cells.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+            md.push_str(" |\n");
+        }
+    }
+    md
+}
+
+/// XLSX/XLS → Markdown 表格（第一个 sheet）
+fn convert_xlsx(path: &std::path::Path) -> Result<String, String> {
+    use calamine::{open_workbook, Reader, Xls, Xlsx};
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let mut md = String::new();
+    if ext == "xlsx" {
+        let mut wb: Xlsx<_> =
+            open_workbook(path).map_err(|e: calamine::XlsxError| e.to_string())?;
+        if let Some(Ok(range)) = wb.worksheet_range_at(0) {
+            md.push_str(&range_to_md(&range));
+        }
+    } else {
+        let mut wb: Xls<_> = open_workbook(path).map_err(|e: calamine::XlsError| e.to_string())?;
+        if let Some(first) = wb.sheet_names().first().cloned() {
+            if let Ok(range) = wb.worksheet_range(&first) {
+                md.push_str(&range_to_md(&range));
+            }
+        }
+    }
+    Ok(md.trim().to_string())
+}
+
+fn range_to_md(range: &calamine::Range<calamine::Data>) -> String {
+    let mut md = String::new();
+    for (i, row) in range.rows().enumerate() {
+        md.push_str("| ");
+        md.push_str(&row.iter().map(cell_to_str).collect::<Vec<_>>().join(" | "));
+        md.push_str(" |\n");
+        if i == 0 {
+            md.push_str("| ");
+            md.push_str(&row.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+            md.push_str(" |\n");
+        }
+    }
+    md
+}
+
+fn cell_to_str(cell: &calamine::Data) -> String {
+    use calamine::Data;
+    match cell {
+        Data::Int(i) => i.to_string(),
+        Data::Float(f) => f.to_string(),
+        Data::String(s) => s.clone(),
+        Data::DateTime(d) => d.to_string(),
+        Data::Bool(b) => b.to_string(),
+        Data::Error(e) => format!("{e:?}"),
+        Data::Empty => String::new(),
+        Data::DurationIso(s) => s.clone(),
+        Data::DateTimeIso(s) => s.clone(),
+    }
 }
