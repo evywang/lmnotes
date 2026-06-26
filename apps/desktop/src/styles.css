@@ -43,6 +43,8 @@ body {
   border-right: 1px solid var(--border);
   padding: 0.5rem;
   overflow: auto;
+  display: flex;
+  flex-direction: column;
 }
 .backrefs {
   border-right: none;
@@ -104,12 +106,44 @@ body {
   background: var(--hover);
 }
 
-/* 文件树 */
-.tree-section {
-  margin-top: 0.8rem;
-  overflow-y: auto;
-  flex: 1;
+/* 文件树 stack widget（底部可折叠） */
+.tree-stack {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
+.tree-stack-open {
+  flex: 1;
+  min-height: 200px;
+}
+.tree-stack-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: var(--hover);
+  border: none;
+  color: var(--fg);
+  padding: 0.5rem;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-family: inherit;
+  text-align: left;
+}
+.tree-stack-header:hover {
+  background: var(--border);
+}
+.tree-stack-arrow {
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+.tree-stack-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.3rem 0;
+}
+
+/* 文件树节点 */
 .file-tree {
   font-size: 0.85rem;
 }

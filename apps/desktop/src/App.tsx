@@ -15,6 +15,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [chatOpen, setChatOpen] = createSignal(false);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
+  const [treeOpen, setTreeOpen] = createSignal(false);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
@@ -104,16 +105,24 @@ export function App() {
           <Show when={!searching() && results().length === 0}>
             <p class="muted small">输入关键词搜索笔记</p>
           </Show>
-          <Show when={query().trim() === ""}>
-            <div class="tree-section">
-              <h3 class="panel-title">文件</h3>
-              <FileTree
-                onOpen={(path) => setActivePath(path)}
-                activePath={activePath}
-                refreshKey={treeRefresh}
-              />
-            </div>
-          </Show>
+          <div class={`tree-stack ${treeOpen() ? "tree-stack-open" : ""}`}>
+            <button
+              class="tree-stack-header"
+              onClick={() => setTreeOpen((v) => !v)}
+            >
+              <span class="tree-stack-arrow">{treeOpen() ? "▼" : "▶"}</span>
+              <span>📁 文件</span>
+            </button>
+            <Show when={treeOpen()}>
+              <div class="tree-stack-body">
+                <FileTree
+                  onOpen={(path) => setActivePath(path)}
+                  activePath={activePath}
+                  refreshKey={treeRefresh}
+                />
+              </div>
+            </Show>
+          </div>
         </aside>
 
         <main class="content">
