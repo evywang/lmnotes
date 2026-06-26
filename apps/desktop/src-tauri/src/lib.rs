@@ -198,7 +198,8 @@ pub fn run() {
             commands::import_note,
             commands::import_document,
             commands::list_tree,
-            commands::delete_note
+            commands::delete_note,
+            commands::create_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

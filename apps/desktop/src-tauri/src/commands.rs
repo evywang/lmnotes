@@ -558,7 +558,21 @@ pub async fn import_note(file_path: String) -> Result<String, String> {
     Ok(path)
 }
 
-/// 多格式导入：PDF/DOCX/XLSX/TXT/MD → Markdown，写入 vault。
+/// 新建子文件夹。
+#[tauri::command]
+pub async fn create_folder(parent_dir: String, name: String) -> Result<String, String> {
+    let slug: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_' || *c == '/')
+        .take(50)
+        .collect();
+    let path = format!("{parent_dir}/{slug}");
+    let full = vault_root().join(&path);
+    tokio::fs::create_dir_all(&full)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(path)
+}
 #[tauri::command]
 pub async fn import_document(file_path: String) -> Result<String, String> {
     use chrono::Utc;

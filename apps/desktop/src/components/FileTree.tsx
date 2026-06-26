@@ -63,6 +63,29 @@ export function FileTree(props: {
     }
   };
 
+  const createNoteInDir = async (dir: string) => {
+    const title = window.prompt("笔记标题：", "新笔记");
+    if (!title) return;
+    try {
+      const path = await invoke<string>("create_note", { title, parentDir: dir });
+      props.onOpen(path);
+      await loadTree();
+    } catch (e) {
+      alert("创建失败: " + e);
+    }
+  };
+
+  const createFolderInDir = async (dir: string) => {
+    const name = window.prompt("文件夹名称：", "new-folder");
+    if (!name) return;
+    try {
+      await invoke("create_folder", { parentDir: dir, name });
+      await loadTree();
+    } catch (e) {
+      alert("创建失败: " + e);
+    }
+  };
+
   // TreeNode 是真正的 SolidJS 组件（首字母大写），其内部的 expanded() 读取是响应式的
   function TreeNode(props: {
     node: FileTreeNode;
@@ -72,6 +95,8 @@ export function FileTree(props: {
     onToggle: (path: string) => void;
     onOpen: (path: string) => void;
     onDelete: (path: string, name: string) => void;
+    onCreateNote: (dir: string) => void;
+    onCreateFolder: (dir: string) => void;
   }) {
     const node = props.node;
     const isOpen = () => props.expanded().has(node.path);
@@ -86,6 +111,22 @@ export function FileTree(props: {
         >
           <span class="tree-icon">{node.is_dir ? (isOpen() ? "📂" : "📁") : "📄"}</span>
           <span class="tree-name">{node.name}</span>
+          <Show when={node.is_dir}>
+            <button
+              class="tree-action"
+              title="新建笔记"
+              onClick={(e) => { e.stopPropagation(); props.onCreateNote(node.path); }}
+            >
+              ＋
+            </button>
+            <button
+              class="tree-action"
+              title="新建文件夹"
+              onClick={(e) => { e.stopPropagation(); props.onCreateFolder(node.path); }}
+            >
+              📁＋
+            </button>
+          </Show>
           <Show when={!node.is_dir}>
             <button
               class="tree-delete"
@@ -110,6 +151,8 @@ export function FileTree(props: {
                 onToggle={props.onToggle}
                 onOpen={props.onOpen}
                 onDelete={props.onDelete}
+                onCreateNote={props.onCreateNote}
+                onCreateFolder={props.onCreateFolder}
               />
             )}
           </For>
@@ -135,6 +178,8 @@ export function FileTree(props: {
             onToggle={toggle}
             onOpen={props.onOpen}
             onDelete={deleteFile}
+            onCreateNote={createNoteInDir}
+            onCreateFolder={createFolderInDir}
           />
         )}
       </For>
