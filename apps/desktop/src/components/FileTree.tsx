@@ -20,9 +20,17 @@ export function FileTree(props: {
     try {
       const nodes = await invoke<FileTreeNode[]>("list_tree", { relPath: null });
       setTree(nodes);
-      // 默认展开第一层
+      // 默认展开前 2 层目录
       const first = new Set<string>();
-      nodes.filter((n) => n.is_dir).forEach((n) => first.add(n.path));
+      const expandDepth = (nodes: FileTreeNode[], depth: number) => {
+        for (const n of nodes) {
+          if (n.is_dir && depth < 2) {
+            first.add(n.path);
+            expandDepth(n.children, depth + 1);
+          }
+        }
+      };
+      expandDepth(nodes, 0);
       setExpanded(first);
     } catch (e) {
       console.error("list_tree", e);
