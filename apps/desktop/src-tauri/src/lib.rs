@@ -80,18 +80,25 @@ pub fn run() {
     // 文件监听：外部编辑 .md 触发重索引
     let indexer_watch = indexer.clone();
     let dir_watch = dir.clone();
-    let (tx, rx) = channel::<PathBuf>();
+    let (tx, rx) = channel::<(PathBuf, bool)>(); // (path, is_remove)
     let watcher_result = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         if let Ok(e) = res {
-            if matches!(
-                e.kind,
-                notify::EventKind::Create(_) | notify::EventKind::Modify(_)
-            ) {
-                for p in &e.paths {
-                    if p.extension().map(|x| x == "md").unwrap_or(false) {
-                        let _ = tx.send(p.clone());
+            match e.kind {
+                notify::EventKind::Create(_) | notify::EventKind::Modify(_) => {
+                    for p in &e.paths {
+                        if p.extension().map(|x| x == "md").unwrap_or(false) {
+                            let _ = tx.send((p.clone(), false));
+                        }
                     }
                 }
+                notify::EventKind::Remove(_) => {
+                    for p in &e.paths {
+                        if p.extension().map(|x| x == "md").unwrap_or(false) {
+                            let _ = tx.send((p.clone(), true));
+                        }
+                    }
+                }
+                _ => {}
             }
         }
     });
@@ -113,9 +120,17 @@ pub fn run() {
         let routing_watch = routing.clone();
         let guard_watch = guard_cfg.clone();
         tauri::async_runtime::spawn(async move {
-            while let Ok(p) = rx.recv() {
+            while let Ok((p, is_remove)) = rx.recv() {
                 if let Ok(rel) = p.strip_prefix(&dir_consumer) {
                     let rel = rel.to_string_lossy().replace('\\', "/");
+                    if is_remove {
+                        // 删除事件：尝试用路径作为 id 清除索引
+                        if let Err(e) = indexer_consumer.unindex(&rel).await {
+                            eprintln!("watch unindex fail {rel}: {e}");
+                        }
+                        continue;
+                    }
+                    // 变更事件：读 + 索引 + 生成建议
                     match tokio::fs::read_to_string(&p).await {
                         Ok(text) => match Concept::parse(&text) {
                             Ok(c) => {
@@ -124,7 +139,6 @@ pub fn run() {
                                 {
                                     eprintln!("watch index fail {rel}: {e}");
                                 }
-                                // 也触发 LLM 建议生成
                                 let text_c = text.clone();
                                 let rel_c = rel.clone();
                                 let sqlite_c = sqlite_watch.clone();
@@ -182,7 +196,9 @@ pub fn run() {
             commands::clear_chat_history,
             commands::create_note,
             commands::import_note,
-            commands::import_document
+            commands::import_document,
+            commands::list_tree,
+            commands::delete_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

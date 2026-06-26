@@ -762,3 +762,91 @@ fn cell_to_str(cell: &calamine::Data) -> String {
         Data::DateTimeIso(s) => s.clone(),
     }
 }
+
+// ============ 文件树 + 删除 ============
+
+#[derive(serde::Serialize)]
+pub struct FileTreeNode {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub children: Vec<FileTreeNode>,
+}
+
+/// 递归列出 vault 目录树（跳过 .lmnotes/）。
+#[tauri::command]
+pub fn list_tree(rel_path: Option<String>) -> Result<Vec<FileTreeNode>, String> {
+    let root = vault_root();
+    let base = match &rel_path {
+        Some(p) => root.join(p),
+        None => root.clone(),
+    };
+    Ok(list_dir_recursive(&root, &base))
+}
+
+fn list_dir_recursive(root: &std::path::Path, dir: &std::path::Path) -> Vec<FileTreeNode> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return vec![],
+    };
+    let mut nodes: Vec<FileTreeNode> = entries
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            // 跳过隐藏目录 + .lmnotes
+            if name.starts_with('.') {
+                return None;
+            }
+            let full = e.path();
+            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            let rel = full
+                .strip_prefix(root)
+                .unwrap_or(&full)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if is_dir {
+                let children = list_dir_recursive(root, &full);
+                Some(FileTreeNode {
+                    name,
+                    path: rel,
+                    is_dir: true,
+                    children,
+                })
+            } else if name.ends_with(".md") {
+                Some(FileTreeNode {
+                    name,
+                    path: rel,
+                    is_dir: false,
+                    children: vec![],
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+    // 目录在前，文件在后
+    nodes.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+    });
+    nodes
+}
+
+/// 删除笔记文件 + 从索引清除。
+#[tauri::command]
+pub async fn delete_note(path: String, indexer: State<'_, Arc<Indexer>>) -> Result<(), String> {
+    let full = vault_root().join(&path);
+    // 先从索引清除（读文件获取 concept id）
+    if let Ok(text) = tokio::fs::read_to_string(&full).await {
+        if let Ok(c) = lmnotes_core::okf::concept::Concept::parse(&text) {
+            let id = c.frontmatter.id.unwrap_or_else(|| path.clone());
+            indexer.unindex(&id).await.map_err(|e| e.to_string())?;
+        }
+    }
+    // 删文件
+    tokio::fs::remove_file(&full)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}

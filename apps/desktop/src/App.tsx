@@ -7,12 +7,14 @@ import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { ChatDrawer } from "./chat/ChatDrawer";
+import { FileTree } from "./components/FileTree";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [chatOpen, setChatOpen] = createSignal(false);
+  const [treeRefresh, setTreeRefresh] = createSignal(0);
 
   const onKeyDown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
@@ -38,6 +40,7 @@ export function App() {
       const path = await invoke<string>("create_note", { title });
       setActivePath(path);
       runSearch("");
+      setTreeRefresh((n) => n + 1);
     } catch (e) {
       console.error("create note", e);
     }
@@ -55,6 +58,7 @@ export function App() {
       const path = await invoke<string>("import_document", { filePath: selected });
       setActivePath(path);
       runSearch("");
+      setTreeRefresh((n) => n + 1);
     } catch (e) {
       console.error("import note", e);
     }
@@ -99,6 +103,16 @@ export function App() {
           </ul>
           <Show when={!searching() && results().length === 0}>
             <p class="muted small">输入关键词搜索笔记</p>
+          </Show>
+          <Show when={query().trim() === ""}>
+            <div class="tree-section">
+              <h3 class="panel-title">文件</h3>
+              <FileTree
+                onOpen={(path) => setActivePath(path)}
+                activePath={activePath}
+                refreshKey={treeRefresh}
+              />
+            </div>
           </Show>
         </aside>
 
