@@ -20,7 +20,7 @@ export function FileTree(props: {
     try {
       const nodes = await invoke<FileTreeNode[]>("list_tree", { relPath: null });
       setTree(nodes);
-      // 默认展开前 2 层目录
+      // 默认展开前 2 层
       const first = new Set<string>();
       const expandDepth = (nodes: FileTreeNode[], depth: number) => {
         for (const n of nodes) {
@@ -37,7 +37,6 @@ export function FileTree(props: {
     }
   };
 
-  // 刷新树（外部操作后）
   createMemo(() => {
     props.refreshKey();
     loadTree();
@@ -64,18 +63,28 @@ export function FileTree(props: {
     }
   };
 
-  const renderNode = (node: FileTreeNode, depth: number) => {
-    const isOpen = expanded().has(node.path);
-    const isActive = props.activePath() === node.path;
+  // TreeNode 是真正的 SolidJS 组件（首字母大写），其内部的 expanded() 读取是响应式的
+  function TreeNode(props: {
+    node: FileTreeNode;
+    depth: number;
+    expanded: () => Set<string>;
+    activePath: () => string | null;
+    onToggle: (path: string) => void;
+    onOpen: (path: string) => void;
+    onDelete: (path: string, name: string) => void;
+  }) {
+    const node = props.node;
+    const isOpen = () => props.expanded().has(node.path);
+    const isActive = () => props.activePath() === node.path;
 
     return (
       <div class="tree-node">
         <div
-          class={`tree-row ${isActive ? "tree-row-active" : ""}`}
-          style={{ "padding-left": `${depth * 14 + 4}px` }}
-          onClick={() => (node.is_dir ? toggle(node.path) : props.onOpen(node.path))}
+          class={`tree-row ${isActive() ? "tree-row-active" : ""}`}
+          style={{ "padding-left": `${props.depth * 14 + 4}px` }}
+          onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
         >
-          <span class="tree-icon">{node.is_dir ? (isOpen ? "📂" : "📁") : "📄"}</span>
+          <span class="tree-icon">{node.is_dir ? (isOpen() ? "📂" : "📁") : "📄"}</span>
           <span class="tree-name">{node.name}</span>
           <Show when={!node.is_dir}>
             <button
@@ -83,21 +92,31 @@ export function FileTree(props: {
               title="删除"
               onClick={(e) => {
                 e.stopPropagation();
-                deleteFile(node.path, node.name);
+                props.onDelete(node.path, node.name);
               }}
             >
               🗑
             </button>
           </Show>
         </div>
-        <Show when={node.is_dir && isOpen}>
+        <Show when={node.is_dir && isOpen()}>
           <For each={node.children}>
-            {(child) => renderNode(child, depth + 1)}
+            {(child) => (
+              <TreeNode
+                node={child}
+                depth={props.depth + 1}
+                expanded={props.expanded}
+                activePath={props.activePath}
+                onToggle={props.onToggle}
+                onOpen={props.onOpen}
+                onDelete={props.onDelete}
+              />
+            )}
           </For>
         </Show>
       </div>
     );
-  };
+  }
 
   return (
     <div class="file-tree">
@@ -106,7 +125,19 @@ export function FileTree(props: {
           暂无笔记
         </p>
       </Show>
-      <For each={tree()}>{(node) => renderNode(node, 0)}</For>
+      <For each={tree()}>
+        {(node) => (
+          <TreeNode
+            node={node}
+            depth={0}
+            expanded={expanded}
+            activePath={props.activePath}
+            onToggle={toggle}
+            onOpen={props.onOpen}
+            onDelete={deleteFile}
+          />
+        )}
+      </For>
     </div>
   );
 }
