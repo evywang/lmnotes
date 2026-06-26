@@ -258,6 +258,91 @@ body {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
+.preview-toggle {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: inherit;
+}
+.preview-toggle:hover {
+  background: var(--hover);
+}
+.preview-toggle.active {
+  background: var(--accent);
+  color: var(--bg);
+  border-color: var(--accent);
+}
+.editor-content-area {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.editor-content-area.split {
+  flex-direction: row;
+}
+.editor-content-area.split .cm-host {
+  width: 50%;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+}
+.markdown-preview {
+  width: 50%;
+  overflow-y: auto;
+  padding: 1rem;
+  line-height: 1.6;
+  font-size: 0.9rem;
+}
+.markdown-preview h1 { font-size: 1.5rem; margin: 1rem 0 0.5rem; }
+.markdown-preview h2 { font-size: 1.25rem; margin: 0.8rem 0 0.4rem; }
+.markdown-preview h3 { font-size: 1.1rem; margin: 0.6rem 0 0.3rem; }
+.markdown-preview p { margin: 0.5rem 0; }
+.markdown-preview ul, .markdown-preview ol { padding-left: 1.5rem; }
+.markdown-preview li { margin: 0.2rem 0; }
+.markdown-preview code {
+  background: var(--hover);
+  padding: 0.1rem 0.3rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+.markdown-preview pre {
+  background: var(--hover);
+  padding: 0.8rem;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.markdown-preview pre code {
+  background: none;
+  padding: 0;
+}
+.markdown-preview table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.5rem 0;
+}
+.markdown-preview th, .markdown-preview td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+.markdown-preview th {
+  background: var(--hover);
+}
+.markdown-preview blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.5rem 0;
+  padding-left: 1rem;
+  color: var(--muted);
+}
+.markdown-preview img {
+  max-width: 100%;
+  border-radius: 6px;
+}
 .editor-path {
   font-family: ui-monospace, monospace;
 }

@@ -1,5 +1,6 @@
-import { createSignal, onMount, Show } from "solid-js";
+import { createSignal, createMemo, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { marked } from "marked";
 import { useCodeMirror } from "./solid-cm";
 import { RewriteMenu } from "./RewriteMenu";
 import type { EditorView } from "@codemirror/view";
@@ -13,6 +14,7 @@ export function Editor(props: { path: string }) {
   const [content, setContent] = createSignal("");
   const [loaded, setLoaded] = createSignal(false);
   const [dirty, setDirty] = createSignal(false);
+  const [preview, setPreview] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let viewGetter = () => undefined as EditorView | undefined;
 
@@ -27,7 +29,13 @@ export function Editor(props: { path: string }) {
     }, 800);
   };
 
-  // 处理粘贴/拖拽图片：哈希去重存盘 → 在光标处插入 markdown 图片链接
+  // 预览 HTML（实时跟随 content）
+  const previewHtml = createMemo(() => {
+    // 去掉 frontmatter 后渲染
+    const body = content().replace(/^---\n[\s\S]*?\n---\n*/, "");
+    return marked.parse(body, { async: false }) as string;
+  });
+
   const handleFiles = async (files: FileList) => {
     for (const f of Array.from(files)) {
       if (!f.type.startsWith("image/")) continue;
@@ -70,26 +78,48 @@ export function Editor(props: { path: string }) {
         <Show when={dirty()}>
           <span class="dirty-dot">●</span>
         </Show>
+        <button
+          class={`preview-toggle ${preview() ? "active" : ""}`}
+          onClick={() => setPreview((v) => !v)}
+          title="编辑/预览切换"
+        >
+          {preview() ? "✏️ 编辑" : "👁 预览"}
+        </button>
       </div>
-      <Show when={loaded()} fallback={<p class="muted">加载中…</p>}>
-        <div
-          class="cm-host"
-          ref={host}
-          onPaste={(e) => {
-            const files = e.clipboardData?.files;
-            if (files && files.length) {
+      <div class={`editor-content-area ${preview() ? "split" : ""}`}>
+        <Show when={loaded()} fallback={<p class="muted">加载中…</p>}>
+          <div
+            class="cm-host"
+            ref={host}
+            onPaste={(e) => {
+              const files = e.clipboardData?.files;
+              if (files && files.length) {
+                e.preventDefault();
+                handleFiles(files);
+              }
+            }}
+            onDrop={(e) => {
               e.preventDefault();
-              handleFiles(files);
-            }
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            const files = e.dataTransfer?.files;
-            if (files) handleFiles(files);
-          }}
-          onDragOver={(e) => e.preventDefault()}
-        />
-      </Show>
+              const files = e.dataTransfer?.files;
+              if (files) handleFiles(files);
+            }}
+            onDragOver={(e) => e.preventDefault()}
+          />
+        </Show>
+        <Show when={preview()}>
+          <div
+            class="markdown-preview"
+            innerHTML={previewHtml()}
+            onClick={(e) => {
+              const target = e.target as HTMLElement;
+              if (target.classList.contains("cite-chip")) {
+                const path = target.dataset.path;
+                if (path) console.log("navigate to", path);
+              }
+            }}
+          />
+        </Show>
+      </div>
       <RewriteMenu
         view={viewGetter}
         conceptPath={props.path}
