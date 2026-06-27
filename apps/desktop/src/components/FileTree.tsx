@@ -170,38 +170,63 @@ export function FileTree(props: {
         <div
           class={`tree-row ${isActive() ? "tree-row-active" : ""} ${isDropTarget() ? "tree-row-drop" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
+          onMouseDown={(e) => {
+            if (e.button !== 0) return; // 只处理左键
+            const startX = e.clientX;
+            const startY = e.clientY;
+            let dragging = false;
+
+            const onMove = (ev: MouseEvent) => {
+              if (!dragging) {
+                const dx = Math.abs(ev.clientX - startX);
+                const dy = Math.abs(ev.clientY - startY);
+                if (dx > 5 || dy > 5) {
+                  dragging = true;
+                  props.onDragStart(node.path);
+                  document.body.style.cursor = "grabbing";
+                }
+              }
+              if (dragging) {
+                ev.preventDefault();
+                // 检测鼠标下方的目录元素
+                const target = document.elementFromPoint(ev.clientX, ev.clientY);
+                const dirRow = target?.closest("[data-is-dir='1']") as HTMLElement | null;
+                if (dirRow) {
+                  const dirPath = dirRow.dataset.nodePath;
+                  if (dirPath && dirPath !== node.path) {
+                    props.setDragOver(dirPath);
+                  } else {
+                    props.setDragOver(null);
+                  }
+                } else {
+                  props.setDragOver(null);
+                }
+              }
+            };
+
+            const onUp = (ev: MouseEvent) => {
+              document.removeEventListener("mousemove", onMove);
+              document.removeEventListener("mouseup", onUp);
+              document.body.style.cursor = "";
+              if (dragging) {
+                const target = document.elementFromPoint(ev.clientX, ev.clientY);
+                const dirRow = target?.closest("[data-is-dir='1']") as HTMLElement | null;
+                if (dirRow) {
+                  const dirPath = dirRow.dataset.nodePath;
+                  if (dirPath && dirPath !== node.path) {
+                    props.onDrop(dirPath);
+                  }
+                }
+                props.onDragEnd();
+                props.setDragOver(null);
+              }
+            };
+
+            document.addEventListener("mousemove", onMove);
+            document.addEventListener("mouseup", onUp);
+          }}
           attr:data-node-path={node.path}
           attr:data-is-dir={node.is_dir ? "1" : "0"}
-          ref={(el) => {
-            // 手动设 draggable 属性（SolidJS 的 draggable prop 可能不生效）
-            el.setAttribute("draggable", "true");
-            // 用原生事件监听确保 WebView2 正确触发拖拽
-            el.addEventListener("dragstart", (e: DragEvent) => {
-              e.dataTransfer?.setData("text/plain", node.path);
-              if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-              props.onDragStart(node.path);
-            });
-            el.addEventListener("dragend", () => props.onDragEnd());
-            if (node.is_dir) {
-              el.addEventListener("dragenter", (e: DragEvent) => {
-                e.preventDefault();
-                props.setDragOver(node.path);
-              });
-              el.addEventListener("dragover", (e: DragEvent) => {
-                e.preventDefault();
-                if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
-              });
-              el.addEventListener("dragleave", () => {
-                if (props.dragOver() === node.path) props.setDragOver(null);
-              });
-              el.addEventListener("drop", (e: DragEvent) => {
-                e.preventDefault();
-                e.stopPropagation();
-                props.onDrop(node.path);
-                props.setDragOver(null);
-              });
-            }
-          }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
           onContextMenu={(e) => {
             e.preventDefault();
