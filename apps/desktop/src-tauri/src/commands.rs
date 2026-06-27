@@ -577,28 +577,41 @@ pub async fn create_folder(parent_dir: String, name: String) -> Result<String, S
     Ok(path)
 }
 
-/// 在系统文件管理器中打开指定路径所在的文件夹。
 /// 在系统文件管理器中打开指定路径所在的文件夹，并选中该文件。
 #[tauri::command]
 pub async fn reveal_in_explorer(rel_path: String) -> Result<(), String> {
     let full = vault_root().join(&rel_path);
-    let path_str = full.to_string_lossy().to_string();
+
+    // 规范化路径：rel_path 来自前端（用 / 分隔），join 后产生混合分隔符路径
+    // （如 C:\...\.lmnotes\default\notes/ai）。Windows 能解析但 explorer.exe 不行。
+    // 用 canonicalize 获取纯 Windows 路径。
+    let canonical = full.canonicalize().unwrap_or_else(|_| full.clone());
+    let path_str = canonical.to_string_lossy().to_string();
+
+    // 辅助日志
+    eprintln!("[reveal] rel_path={rel_path}");
+    eprintln!("[reveal] vault_root={}", vault_root().display());
+    eprintln!("[reveal] full_path={path_str}");
+    eprintln!("[reveal] exists={}", full.exists());
+
     #[cfg(target_os = "windows")]
     {
-        // explorer.exe 的参数解析非常特殊：不遵循标准 Windows 命令行引号规则。
-        // 必须用 raw creation flags 绕过 Rust Command 的自动引号包裹。
-        // 用 /select,"路径" 格式，通过 cmd /c 调用确保参数正确传递。
-        std::process::Command::new("cmd")
-            .args([
-                "/C",
-                "start",
-                "",
-                "explorer.exe",
-                &format!("/select,{path_str}"),
-            ])
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .spawn()
-            .map_err(|e| e.to_string())?;
+        use std::os::windows::process::CommandExt;
+
+        // 用 /select,"路径" 直接调 explorer.exe（不加额外引号层）
+        let select_arg = if full.is_dir() {
+            path_str.clone()
+        } else {
+            format!(r#"/select,"{path_str}""#)
+        };
+        eprintln!("[reveal] explorer.exe raw_arg={select_arg}");
+
+        let result = std::process::Command::new("explorer.exe")
+            .raw_arg(&select_arg)
+            .creation_flags(0x08000000)
+            .spawn();
+        eprintln!("[reveal] spawn result: {:?}", result.as_ref().err());
+        result.map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -619,7 +632,6 @@ pub async fn reveal_in_explorer(rel_path: String) -> Result<(), String> {
             .spawn()
             .map_err(|e| e.to_string())?;
     }
-    #[allow(unused_variables)]
     let _ = &path_str;
     Ok(())
 }
