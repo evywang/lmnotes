@@ -15,6 +15,13 @@ const [ctxMenu, setCtxMenu] = createSignal<{
   node: FileTreeNode;
 } | null>(null);
 
+// 移动对话框状态
+const [moveDialog, setMoveDialog] = createSignal<{
+  srcPath: string;
+  srcName: string;
+  dirs: { path: string; name: string }[];
+} | null>(null);
+
 export function FileTree(props: {
   onOpen: (path: string) => void;
   activePath: () => string | null;
@@ -113,25 +120,13 @@ export function FileTree(props: {
     }
   };
 
-  const moveToDialog = async (srcPath: string, srcName: string) => {
-    // 弹出目标目录选择对话框（用现有的树构建选项）
-    const dirs = collectDirs(tree());
+  const moveToDialog = (srcPath: string, srcName: string) => {
+    const dirs = collectDirs(tree()).map((d) => ({ path: d.path, name: d.name }));
     if (dirs.length === 0) {
       alert("没有可移动到的目录");
       return;
     }
-    const options = dirs.map((d) => `${d.path} (${d.name})`).join("\n");
-    const choice = window.prompt(
-      `移动 "${srcName}" 到哪个目录？\n\n输入序号（从 1 开始）：\n${dirs.map((d, i) => `${i + 1}. ${d.path}`).join("\n")}`,
-      "1"
-    );
-    if (!choice) return;
-    const idx = parseInt(choice) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= dirs.length) {
-      alert("无效选择");
-      return;
-    }
-    await doMove(srcPath, dirs[idx].path);
+    setMoveDialog({ srcPath, srcName, dirs });
   };
 
   const collectDirs = (nodes: FileTreeNode[]): FileTreeNode[] => {
@@ -337,6 +332,35 @@ export function FileTree(props: {
               </button>
             </div>
           </>
+        )}
+      </Show>
+
+      {/* 移动到对话框 */}
+      <Show when={moveDialog()}>
+        {(dlg) => (
+          <div class="move-overlay" onClick={() => setMoveDialog(null)}>
+            <div class="move-dialog" onClick={(e) => e.stopPropagation()}>
+              <h3>移动 "{dlg().srcName}" 到</h3>
+              <div class="move-list">
+                <For each={dlg().dirs}>
+                  {(dir) => (
+                    <button
+                      class="move-dir-item"
+                      onClick={async () => {
+                        await doMove(dlg().srcPath, dir.path);
+                        setMoveDialog(null);
+                      }}
+                    >
+                      📁 {dir.path}
+                    </button>
+                  )}
+                </For>
+              </div>
+              <button class="btn-secondary" onClick={() => setMoveDialog(null)}>
+                取消
+              </button>
+            </div>
+          </div>
         )}
       </Show>
     </div>
