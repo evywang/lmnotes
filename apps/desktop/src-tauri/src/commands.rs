@@ -575,31 +575,33 @@ pub async fn create_folder(parent_dir: String, name: String) -> Result<String, S
 }
 
 /// 在系统文件管理器中打开指定路径所在的文件夹。
+/// 在系统文件管理器中打开指定路径所在的文件夹，并选中该文件。
 #[tauri::command]
 pub async fn reveal_in_explorer(rel_path: String) -> Result<(), String> {
     let full = vault_root().join(&rel_path);
-    let dir = if full.is_dir() {
-        &full
-    } else {
-        full.parent().unwrap_or(&full)
-    };
-    // Windows: explorer.exe, macOS: open, Linux: xdg-open
     #[cfg(target_os = "windows")]
     {
+        // Windows: explorer.exe /select,"路径" — 选中文件本身
         std::process::Command::new("explorer.exe")
-            .arg(dir)
+            .arg(format!("/select,{}", full.display()))
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
     {
+        // macOS: open -R 显示文件在 Finder 中的位置
         std::process::Command::new("open")
-            .arg(dir)
+            .args(["-R", &full.display().to_string()])
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
+        let dir = if full.is_dir() {
+            &full
+        } else {
+            full.parent().unwrap_or(&full)
+        };
         std::process::Command::new("xdg-open")
             .arg(dir)
             .spawn()
