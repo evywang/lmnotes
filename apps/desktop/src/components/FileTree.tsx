@@ -8,6 +8,13 @@ interface FileTreeNode {
   children: FileTreeNode[];
 }
 
+// 右键上下文菜单状态
+const [ctxMenu, setCtxMenu] = createSignal<{
+  x: number;
+  y: number;
+  node: FileTreeNode;
+} | null>(null);
+
 export function FileTree(props: {
   onOpen: (path: string) => void;
   activePath: () => string | null;
@@ -86,6 +93,14 @@ export function FileTree(props: {
     }
   };
 
+  const revealInExplorer = async (path: string) => {
+    try {
+      await invoke("reveal_in_explorer", { relPath: path });
+    } catch (e) {
+      alert("打开失败: " + e);
+    }
+  };
+
   // TreeNode 是真正的 SolidJS 组件（首字母大写），其内部的 expanded() 读取是响应式的
   function TreeNode(props: {
     node: FileTreeNode;
@@ -97,6 +112,7 @@ export function FileTree(props: {
     onDelete: (path: string, name: string) => void;
     onCreateNote: (dir: string) => void;
     onCreateFolder: (dir: string) => void;
+    onReveal: (path: string) => void;
   }) {
     const node = props.node;
     const isOpen = () => props.expanded().has(node.path);
@@ -108,6 +124,10 @@ export function FileTree(props: {
           class={`tree-row ${isActive() ? "tree-row-active" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setCtxMenu({ x: e.clientX, y: e.clientY, node });
+          }}
         >
           <span class="tree-icon">{node.is_dir ? (isOpen() ? "📂" : "📁") : "📄"}</span>
           <span class="tree-name">{node.name}</span>
@@ -153,6 +173,7 @@ export function FileTree(props: {
                 onDelete={props.onDelete}
                 onCreateNote={props.onCreateNote}
                 onCreateFolder={props.onCreateFolder}
+                onReveal={props.onReveal}
               />
             )}
           </For>
@@ -180,9 +201,49 @@ export function FileTree(props: {
             onDelete={deleteFile}
             onCreateNote={createNoteInDir}
             onCreateFolder={createFolderInDir}
+            onReveal={revealInExplorer}
           />
         )}
       </For>
+
+      {/* 右键上下文菜单 */}
+      <Show when={ctxMenu()}>
+        {(menu) => (
+          <>
+            <div
+              class="ctx-menu-overlay"
+              onClick={() => setCtxMenu(null)}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+            />
+            <div
+              class="ctx-menu"
+              style={{ left: `${menu().x}px`, top: `${menu().y}px` }}
+            >
+              <Show when={menu().node.is_dir}>
+                <button class="ctx-item" onClick={() => { createNoteInDir(menu().node.path); setCtxMenu(null); }}>
+                  📄 新建笔记
+                </button>
+                <button class="ctx-item" onClick={() => { createFolderInDir(menu().node.path); setCtxMenu(null); }}>
+                  📁 新建文件夹
+                </button>
+                <div class="ctx-sep" />
+              </Show>
+              <Show when={!menu().node.is_dir}>
+                <button class="ctx-item" onClick={() => { props.onOpen(menu().node.path); setCtxMenu(null); }}>
+                  📄 打开
+                </button>
+                <div class="ctx-sep" />
+                <button class="ctx-item" onClick={() => { deleteFile(menu().node.path, menu().node.name); setCtxMenu(null); }}>
+                  🗑 删除
+                </button>
+              </Show>
+              <button class="ctx-item" onClick={() => { revealInExplorer(menu().node.path); setCtxMenu(null); }}>
+                🖥 在文件管理器中打开
+              </button>
+            </div>
+          </>
+        )}
+      </Show>
     </div>
   );
 }

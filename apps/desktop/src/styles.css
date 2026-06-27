@@ -199,6 +199,46 @@ body {
 .tree-delete:hover {
   opacity: 1 !important;
 }
+
+/* 右键上下文菜单 */
+.ctx-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 201;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.3rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  min-width: 160px;
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-family: inherit;
+}
+.ctx-item:hover {
+  background: var(--hover);
+}
+.ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 0.2rem 0;
+}
 .result-list {
   list-style: none;
   padding: 0;

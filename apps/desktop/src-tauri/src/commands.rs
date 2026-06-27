@@ -573,6 +573,40 @@ pub async fn create_folder(parent_dir: String, name: String) -> Result<String, S
         .map_err(|e| e.to_string())?;
     Ok(path)
 }
+
+/// 在系统文件管理器中打开指定路径所在的文件夹。
+#[tauri::command]
+pub async fn reveal_in_explorer(rel_path: String) -> Result<(), String> {
+    let full = vault_root().join(&rel_path);
+    let dir = if full.is_dir() {
+        &full
+    } else {
+        full.parent().unwrap_or(&full)
+    };
+    // Windows: explorer.exe, macOS: open, Linux: xdg-open
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(dir)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 #[tauri::command]
 pub async fn import_document(file_path: String) -> Result<String, String> {
     use chrono::Utc;
