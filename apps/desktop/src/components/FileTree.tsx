@@ -170,35 +170,36 @@ export function FileTree(props: {
         <div
           class={`tree-row ${isActive() ? "tree-row-active" : ""} ${isDropTarget() ? "tree-row-drop" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
-          draggable={true}
-          onDragStart={(e) => {
-            e.dataTransfer?.setData("text/plain", node.path);
-            e.dataTransfer?.setData("text/node-path", node.path);
-            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-            props.onDragStart(node.path);
-          }}
-          onDragEnd={() => props.onDragEnd()}
-          onDragEnter={(e) => {
+          attr:data-node-path={node.path}
+          attr:data-is-dir={node.is_dir ? "1" : "0"}
+          ref={(el) => {
+            // 手动设 draggable 属性（SolidJS 的 draggable prop 可能不生效）
+            el.setAttribute("draggable", "true");
+            // 用原生事件监听确保 WebView2 正确触发拖拽
+            el.addEventListener("dragstart", (e: DragEvent) => {
+              e.dataTransfer?.setData("text/plain", node.path);
+              if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+              props.onDragStart(node.path);
+            });
+            el.addEventListener("dragend", () => props.onDragEnd());
             if (node.is_dir) {
-              e.preventDefault();
-              props.setDragOver(node.path);
-            }
-          }}
-          onDragOver={(e) => {
-            if (node.is_dir) {
-              e.preventDefault();
-              e.dataTransfer!.dropEffect = "move";
-            }
-          }}
-          onDragLeave={() => {
-            if (props.dragOver() === node.path) props.setDragOver(null);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (node.is_dir) {
-              props.onDrop(node.path);
-              props.setDragOver(null);
+              el.addEventListener("dragenter", (e: DragEvent) => {
+                e.preventDefault();
+                props.setDragOver(node.path);
+              });
+              el.addEventListener("dragover", (e: DragEvent) => {
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+              });
+              el.addEventListener("dragleave", () => {
+                if (props.dragOver() === node.path) props.setDragOver(null);
+              });
+              el.addEventListener("drop", (e: DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                props.onDrop(node.path);
+                props.setDragOver(null);
+              });
             }
           }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
