@@ -5,6 +5,9 @@
 
 #![allow(clippy::disallowed_methods)]
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
@@ -579,34 +582,45 @@ pub async fn create_folder(parent_dir: String, name: String) -> Result<String, S
 #[tauri::command]
 pub async fn reveal_in_explorer(rel_path: String) -> Result<(), String> {
     let full = vault_root().join(&rel_path);
+    let path_str = full.to_string_lossy().to_string();
     #[cfg(target_os = "windows")]
     {
-        // Windows: explorer.exe /select,"路径" — 选中文件本身
-        std::process::Command::new("explorer.exe")
-            .arg(format!("/select,{}", full.display()))
+        // explorer.exe 的参数解析非常特殊：不遵循标准 Windows 命令行引号规则。
+        // 必须用 raw creation flags 绕过 Rust Command 的自动引号包裹。
+        // 用 /select,"路径" 格式，通过 cmd /c 调用确保参数正确传递。
+        std::process::Command::new("cmd")
+            .args([
+                "/C",
+                "start",
+                "",
+                "explorer.exe",
+                &format!("/select,{path_str}"),
+            ])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "macos")]
     {
-        // macOS: open -R 显示文件在 Finder 中的位置
         std::process::Command::new("open")
-            .args(["-R", &full.display().to_string()])
+            .args(["-R", &path_str])
             .spawn()
             .map_err(|e| e.to_string())?;
     }
     #[cfg(target_os = "linux")]
     {
         let dir = if full.is_dir() {
-            &full
+            full.clone()
         } else {
-            full.parent().unwrap_or(&full)
+            full.parent().unwrap_or(&full).to_path_buf()
         };
         std::process::Command::new("xdg-open")
-            .arg(dir)
+            .arg(&dir)
             .spawn()
             .map_err(|e| e.to_string())?;
     }
+    #[allow(unused_variables)]
+    let _ = &path_str;
     Ok(())
 }
 #[tauri::command]
