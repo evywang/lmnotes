@@ -173,13 +173,21 @@ export function FileTree(props: {
           draggable={true}
           onDragStart={(e) => {
             e.dataTransfer?.setData("text/plain", node.path);
+            e.dataTransfer?.setData("text/node-path", node.path);
+            if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
             props.onDragStart(node.path);
           }}
           onDragEnd={() => props.onDragEnd()}
-          onDragOver={(e) => {
+          onDragEnter={(e) => {
             if (node.is_dir) {
               e.preventDefault();
               props.setDragOver(node.path);
+            }
+          }}
+          onDragOver={(e) => {
+            if (node.is_dir) {
+              e.preventDefault();
+              e.dataTransfer!.dropEffect = "move";
             }
           }}
           onDragLeave={() => {
@@ -187,6 +195,7 @@ export function FileTree(props: {
           }}
           onDrop={(e) => {
             e.preventDefault();
+            e.stopPropagation();
             if (node.is_dir) {
               props.onDrop(node.path);
               props.setDragOver(null);

@@ -146,6 +146,7 @@ body {
 /* 文件树节点 */
 .file-tree {
   font-size: 0.85rem;
+  user-select: none;
 }
 .tree-row {
   display: flex;
@@ -156,6 +157,7 @@ body {
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
+  -webkit-user-drag: element;
 }
 .tree-row:hover {
   background: var(--hover);
