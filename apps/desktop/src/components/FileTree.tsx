@@ -101,6 +101,50 @@ export function FileTree(props: {
     }
   };
 
+  const [moveTarget, setMoveTarget] = createSignal<string | null>(null);
+  const [dragOver, setDragOver] = createSignal<string | null>(null);
+
+  const doMove = async (srcPath: string, destDir: string) => {
+    try {
+      await invoke("move_item", { srcPath, destDir });
+      await loadTree();
+    } catch (e) {
+      alert("移动失败: " + e);
+    }
+  };
+
+  const moveToDialog = async (srcPath: string, srcName: string) => {
+    // 弹出目标目录选择对话框（用现有的树构建选项）
+    const dirs = collectDirs(tree());
+    if (dirs.length === 0) {
+      alert("没有可移动到的目录");
+      return;
+    }
+    const options = dirs.map((d) => `${d.path} (${d.name})`).join("\n");
+    const choice = window.prompt(
+      `移动 "${srcName}" 到哪个目录？\n\n输入序号（从 1 开始）：\n${dirs.map((d, i) => `${i + 1}. ${d.path}`).join("\n")}`,
+      "1"
+    );
+    if (!choice) return;
+    const idx = parseInt(choice) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= dirs.length) {
+      alert("无效选择");
+      return;
+    }
+    await doMove(srcPath, dirs[idx].path);
+  };
+
+  const collectDirs = (nodes: FileTreeNode[]): FileTreeNode[] => {
+    let result: FileTreeNode[] = [];
+    for (const n of nodes) {
+      if (n.is_dir) {
+        result.push(n);
+        result = result.concat(collectDirs(n.children));
+      }
+    }
+    return result;
+  };
+
   // TreeNode 是真正的 SolidJS 组件（首字母大写），其内部的 expanded() 读取是响应式的
   function TreeNode(props: {
     node: FileTreeNode;
@@ -113,16 +157,46 @@ export function FileTree(props: {
     onCreateNote: (dir: string) => void;
     onCreateFolder: (dir: string) => void;
     onReveal: (path: string) => void;
+    onMoveDialog: (path: string, name: string) => void;
+    onDragStart: (path: string) => void;
+    onDragEnd: () => void;
+    onDrop: (destDir: string) => void;
+    dragOver: () => string | null;
+    setDragOver: (path: string | null) => void;
+    moveTarget: () => string | null;
   }) {
     const node = props.node;
     const isOpen = () => props.expanded().has(node.path);
     const isActive = () => props.activePath() === node.path;
+    const isDropTarget = () => node.is_dir && props.dragOver() === node.path;
 
     return (
       <div class="tree-node">
         <div
-          class={`tree-row ${isActive() ? "tree-row-active" : ""}`}
+          class={`tree-row ${isActive() ? "tree-row-active" : ""} ${isDropTarget() ? "tree-row-drop" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
+          draggable={true}
+          onDragStart={(e) => {
+            e.dataTransfer?.setData("text/plain", node.path);
+            props.onDragStart(node.path);
+          }}
+          onDragEnd={() => props.onDragEnd()}
+          onDragOver={(e) => {
+            if (node.is_dir) {
+              e.preventDefault();
+              props.setDragOver(node.path);
+            }
+          }}
+          onDragLeave={() => {
+            if (props.dragOver() === node.path) props.setDragOver(null);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (node.is_dir) {
+              props.onDrop(node.path);
+              props.setDragOver(null);
+            }
+          }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -174,6 +248,13 @@ export function FileTree(props: {
                 onCreateNote={props.onCreateNote}
                 onCreateFolder={props.onCreateFolder}
                 onReveal={props.onReveal}
+                onMoveDialog={props.onMoveDialog}
+                onDragStart={props.onDragStart}
+                onDragEnd={props.onDragEnd}
+                onDrop={props.onDrop}
+                dragOver={props.dragOver}
+                setDragOver={props.setDragOver}
+                moveTarget={props.moveTarget}
               />
             )}
           </For>
@@ -202,6 +283,16 @@ export function FileTree(props: {
             onCreateNote={createNoteInDir}
             onCreateFolder={createFolderInDir}
             onReveal={revealInExplorer}
+            onMoveDialog={moveToDialog}
+            onDragStart={setMoveTarget}
+            onDragEnd={() => { setMoveTarget(null); setDragOver(null); }}
+            onDrop={(destDir) => {
+              if (moveTarget()) doMove(moveTarget()!, destDir);
+              setMoveTarget(null);
+            }}
+            dragOver={dragOver}
+            setDragOver={setDragOver}
+            moveTarget={moveTarget}
           />
         )}
       </For>
@@ -236,7 +327,11 @@ export function FileTree(props: {
                 <button class="ctx-item" onClick={() => { deleteFile(menu().node.path, menu().node.name); setCtxMenu(null); }}>
                   🗑 删除
                 </button>
+                <div class="ctx-sep" />
               </Show>
+              <button class="ctx-item" onClick={() => { moveToDialog(menu().node.path, menu().node.name); setCtxMenu(null); }}>
+                ✂️ 移动到…
+              </button>
               <button class="ctx-item" onClick={() => { revealInExplorer(menu().node.path); setCtxMenu(null); }}>
                 🖥 在文件管理器中打开
               </button>

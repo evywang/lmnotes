@@ -200,7 +200,8 @@ pub fn run() {
             commands::list_tree,
             commands::delete_note,
             commands::create_folder,
-            commands::reveal_in_explorer
+            commands::reveal_in_explorer,
+            commands::move_item
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -909,6 +909,36 @@ fn list_dir_recursive(root: &std::path::Path, dir: &std::path::Path) -> Vec<File
     nodes
 }
 
+/// 移动文件或文件夹到新目录（更新索引）。
+/// src_path: vault 相对路径（如 notes/ai/attention.md）
+/// dest_dir: 目标目录（如 notes/projects）
+#[tauri::command]
+pub async fn move_item(src_path: String, dest_dir: String) -> Result<String, String> {
+    let root = vault_root();
+    let src_full = root.join(&src_path);
+    let file_name = src_full
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .ok_or("无法获取文件名")?;
+    let dest_full = root.join(&dest_dir).join(&file_name);
+
+    eprintln!("[move_item] {src_path} → {dest_dir}/{file_name}");
+
+    // 确保目标目录存在
+    tokio::fs::create_dir_all(root.join(&dest_dir))
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 移动
+    tokio::fs::rename(&src_full, &dest_full)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 返回新路径（vault 相对）
+    let new_rel = format!("{dest_dir}/{file_name}");
+    Ok(new_rel)
+}
+
 /// 删除笔记文件 + 从索引清除。
 #[tauri::command]
 pub async fn delete_note(path: String, indexer: State<'_, Arc<Indexer>>) -> Result<(), String> {

@@ -164,6 +164,10 @@ body {
   background: var(--accent);
   color: var(--bg);
 }
+.tree-row-drop {
+  background: rgba(137, 180, 250, 0.2);
+  border: 1px dashed var(--accent);
+}
 .tree-icon {
   flex-shrink: 0;
   font-size: 0.85rem;
