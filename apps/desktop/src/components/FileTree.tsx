@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onMount, createMemo } from "solid-js";
+import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 
 interface FileTreeNode {
@@ -26,13 +26,16 @@ const [moveDialog, setMoveDialog] = createSignal<{
 const [dragSrc, setDragSrc] = createSignal<string | null>(null);
 const [dragOverPath, setDragOverPath] = createSignal<string | null>(null);
 
-// 用 use: 指令绑定原生 mousedown 事件（绕过 SolidJS 事件委托）
-function draggable(node: HTMLElement, accessor: () => { path: string; onDragStart: (p: string) => void }) {
-  const data = accessor();
-  node.setAttribute("data-node-path", data.path);
+// 用 ref 回调绑定原生拖拽（queueMicrotask 确保 DOM 挂载）
+function bindDrag(el: HTMLElement, node: FileTreeNode) {
+  el.setAttribute("data-node-path", node.path);
+  el.setAttribute("data-is-dir", node.is_dir ? "1" : "0");
 
-  const onMouseDown = (e: MouseEvent) => {
+  el.addEventListener("mousedown", (e: MouseEvent) => {
     if (e.button !== 0) return;
+    e.stopPropagation();
+    console.log("[drag] mousedown on", node.path);
+
     const startX = e.clientX;
     const startY = e.clientY;
     let started = false;
@@ -41,18 +44,18 @@ function draggable(node: HTMLElement, accessor: () => { path: string; onDragStar
       if (!started) {
         if (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4) {
           started = true;
-          setDragSrc(data.path);
-          data.onDragStart(data.path);
+          setDragSrc(node.path);
           document.body.style.userSelect = "none";
+          console.log("[drag] started, src=", node.path);
         }
       }
       if (started) {
         ev.preventDefault();
-        const el = document.elementFromPoint(ev.clientX, ev.clientY);
-        const dirEl = el?.closest("[data-is-dir='1']") as HTMLElement | null;
+        const tgt = document.elementFromPoint(ev.clientX, ev.clientY);
+        const dirEl = tgt?.closest("[data-is-dir='1']") as HTMLElement | null;
         if (dirEl) {
-          const dp = dirEl.dataset.nodePath!;
-          setDragOverPath(dp !== data.path ? dp : null);
+          const dp = dirEl.getAttribute("data-node-path")!;
+          setDragOverPath(dp !== node.path ? dp : null);
         } else {
           setDragOverPath(null);
         }
@@ -64,13 +67,13 @@ function draggable(node: HTMLElement, accessor: () => { path: string; onDragStar
       document.removeEventListener("mouseup", onUp);
       document.body.style.userSelect = "";
       if (started) {
-        const el = document.elementFromPoint(ev.clientX, ev.clientY);
-        const dirEl = el?.closest("[data-is-dir='1']") as HTMLElement | null;
+        const tgt = document.elementFromPoint(ev.clientX, ev.clientY);
+        const dirEl = tgt?.closest("[data-is-dir='1']") as HTMLElement | null;
         if (dirEl) {
-          const dp = dirEl.dataset.nodePath!;
-          if (dp !== data.path) {
-            // 触发 drop（通过自定义事件传回）
-            node.dispatchEvent(new CustomEvent("treedrop", { detail: dp, bubbles: true }));
+          const dp = dirEl.getAttribute("data-node-path")!;
+          if (dp !== node.path) {
+            console.log("[drag] drop", node.path, "->", dp);
+            window.dispatchEvent(new CustomEvent("lmnotes-treedrop", { detail: { src: node.path, dest: dp } }));
           }
         }
         setDragSrc(null);
@@ -80,9 +83,7 @@ function draggable(node: HTMLElement, accessor: () => { path: string; onDragStar
 
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
-  };
-
-  node.addEventListener("mousedown", onMouseDown);
+  });
 }
 
 export function FileTree(props: {
@@ -189,6 +190,16 @@ export function FileTree(props: {
     setMoveDialog({ srcPath, srcName, dirs });
   };
 
+  // 监听全局 treedrop 事件
+  onMount(() => {
+    const handler = (e: Event) => {
+      const { src, dest } = (e as CustomEvent).detail;
+      doMove(src, dest);
+    };
+    window.addEventListener("lmnotes-treedrop", handler);
+    onCleanup(() => window.removeEventListener("lmnotes-treedrop", handler));
+  });
+
   const collectDirs = (nodes: FileTreeNode[]): FileTreeNode[] => {
     let result: FileTreeNode[] = [];
     for (const n of nodes) {
@@ -223,11 +234,11 @@ export function FileTree(props: {
     return (
       <div class="tree-node">
         <div
+          ref={(el) => queueMicrotask(() => bindDrag(el, node))}
           class={`tree-row ${isActive() ? "tree-row-active" : ""} ${isDropTarget() ? "tree-row-drop" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
           attr:data-node-path={node.path}
           attr:data-is-dir={node.is_dir ? "1" : "0"}
-          {...{ "use:draggable": { path: node.path, onDragStart: () => {} } }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -290,14 +301,7 @@ export function FileTree(props: {
   }
 
   return (
-    <div
-      class="file-tree"
-      {...{ "on:treedrop": (e: Event) => {
-        const dest = (e as CustomEvent).detail as string;
-        const src = dragSrc();
-        if (src && dest) doMove(src, dest);
-      }}}
-    >
+    <div class="file-tree">
       <Show when={tree().length === 0}>
         <p class="muted small" style={{ padding: "0.5rem" }}>
           暂无笔记
