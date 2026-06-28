@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/lmnotes-core", "crates/lmnotes-cli", "apps/desktop/src-tauri"]
+members = [
+    "crates/lmnotes-core",
+    "crates/lmnotes-cli",
+    "crates/lmnotes-mcp",
+    "apps/desktop/src-tauri",
+]
 resolver = "2"
 
 [workspace.package]
