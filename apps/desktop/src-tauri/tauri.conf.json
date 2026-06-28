@@ -16,12 +16,28 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "publisher": "LMNotes",
+    "category": "Productivity",
+    "shortDescription": "Local-first, LLM-native note app with OKF compliance",
+    "longDescription": "LMNotes is a local-first, LLM-native personal knowledge app. It uses Open Knowledge Format (OKF) to store notes as plain markdown with YAML frontmatter, with AI-powered suggestions, search, and chat-with-vault features.",
+    "copyright": "© 2026 LMNotes",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.ico",
       "icons/icon.png"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["en-US", "zh-CN"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
   }
 }
