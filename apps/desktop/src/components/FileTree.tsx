@@ -22,6 +22,69 @@ const [moveDialog, setMoveDialog] = createSignal<{
   dirs: { path: string; name: string }[];
 } | null>(null);
 
+// 全局拖拽状态
+const [dragSrc, setDragSrc] = createSignal<string | null>(null);
+const [dragOverPath, setDragOverPath] = createSignal<string | null>(null);
+
+// 用 use: 指令绑定原生 mousedown 事件（绕过 SolidJS 事件委托）
+function draggable(node: HTMLElement, accessor: () => { path: string; onDragStart: (p: string) => void }) {
+  const data = accessor();
+  node.setAttribute("data-node-path", data.path);
+
+  const onMouseDown = (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let started = false;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!started) {
+        if (Math.abs(ev.clientX - startX) > 4 || Math.abs(ev.clientY - startY) > 4) {
+          started = true;
+          setDragSrc(data.path);
+          data.onDragStart(data.path);
+          document.body.style.userSelect = "none";
+        }
+      }
+      if (started) {
+        ev.preventDefault();
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const dirEl = el?.closest("[data-is-dir='1']") as HTMLElement | null;
+        if (dirEl) {
+          const dp = dirEl.dataset.nodePath!;
+          setDragOverPath(dp !== data.path ? dp : null);
+        } else {
+          setDragOverPath(null);
+        }
+      }
+    };
+
+    const onUp = (ev: MouseEvent) => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+      if (started) {
+        const el = document.elementFromPoint(ev.clientX, ev.clientY);
+        const dirEl = el?.closest("[data-is-dir='1']") as HTMLElement | null;
+        if (dirEl) {
+          const dp = dirEl.dataset.nodePath!;
+          if (dp !== data.path) {
+            // 触发 drop（通过自定义事件传回）
+            node.dispatchEvent(new CustomEvent("treedrop", { detail: dp, bubbles: true }));
+          }
+        }
+        setDragSrc(null);
+        setDragOverPath(null);
+      }
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
+  node.addEventListener("mousedown", onMouseDown);
+}
+
 export function FileTree(props: {
   onOpen: (path: string) => void;
   activePath: () => string | null;
@@ -108,9 +171,6 @@ export function FileTree(props: {
     }
   };
 
-  const [moveTarget, setMoveTarget] = createSignal<string | null>(null);
-  const [dragOver, setDragOver] = createSignal<string | null>(null);
-
   const doMove = async (srcPath: string, destDir: string) => {
     try {
       await invoke("move_item", { srcPath, destDir });
@@ -153,80 +213,21 @@ export function FileTree(props: {
     onCreateFolder: (dir: string) => void;
     onReveal: (path: string) => void;
     onMoveDialog: (path: string, name: string) => void;
-    onDragStart: (path: string) => void;
-    onDragEnd: () => void;
-    onDrop: (destDir: string) => void;
-    dragOver: () => string | null;
-    setDragOver: (path: string | null) => void;
-    moveTarget: () => string | null;
+    onMove: (src: string, dest: string) => void;
   }) {
     const node = props.node;
     const isOpen = () => props.expanded().has(node.path);
     const isActive = () => props.activePath() === node.path;
-    const isDropTarget = () => node.is_dir && props.dragOver() === node.path;
+    const isDropTarget = () => node.is_dir && dragOverPath() === node.path;
 
     return (
       <div class="tree-node">
         <div
           class={`tree-row ${isActive() ? "tree-row-active" : ""} ${isDropTarget() ? "tree-row-drop" : ""}`}
           style={{ "padding-left": `${props.depth * 14 + 4}px` }}
-          onMouseDown={(e) => {
-            if (e.button !== 0) return; // 只处理左键
-            const startX = e.clientX;
-            const startY = e.clientY;
-            let dragging = false;
-
-            const onMove = (ev: MouseEvent) => {
-              if (!dragging) {
-                const dx = Math.abs(ev.clientX - startX);
-                const dy = Math.abs(ev.clientY - startY);
-                if (dx > 5 || dy > 5) {
-                  dragging = true;
-                  props.onDragStart(node.path);
-                  document.body.style.cursor = "grabbing";
-                }
-              }
-              if (dragging) {
-                ev.preventDefault();
-                // 检测鼠标下方的目录元素
-                const target = document.elementFromPoint(ev.clientX, ev.clientY);
-                const dirRow = target?.closest("[data-is-dir='1']") as HTMLElement | null;
-                if (dirRow) {
-                  const dirPath = dirRow.dataset.nodePath;
-                  if (dirPath && dirPath !== node.path) {
-                    props.setDragOver(dirPath);
-                  } else {
-                    props.setDragOver(null);
-                  }
-                } else {
-                  props.setDragOver(null);
-                }
-              }
-            };
-
-            const onUp = (ev: MouseEvent) => {
-              document.removeEventListener("mousemove", onMove);
-              document.removeEventListener("mouseup", onUp);
-              document.body.style.cursor = "";
-              if (dragging) {
-                const target = document.elementFromPoint(ev.clientX, ev.clientY);
-                const dirRow = target?.closest("[data-is-dir='1']") as HTMLElement | null;
-                if (dirRow) {
-                  const dirPath = dirRow.dataset.nodePath;
-                  if (dirPath && dirPath !== node.path) {
-                    props.onDrop(dirPath);
-                  }
-                }
-                props.onDragEnd();
-                props.setDragOver(null);
-              }
-            };
-
-            document.addEventListener("mousemove", onMove);
-            document.addEventListener("mouseup", onUp);
-          }}
           attr:data-node-path={node.path}
           attr:data-is-dir={node.is_dir ? "1" : "0"}
+          {...{ "use:draggable": { path: node.path, onDragStart: () => {} } }}
           onClick={() => (node.is_dir ? props.onToggle(node.path) : props.onOpen(node.path))}
           onContextMenu={(e) => {
             e.preventDefault();
@@ -279,12 +280,7 @@ export function FileTree(props: {
                 onCreateFolder={props.onCreateFolder}
                 onReveal={props.onReveal}
                 onMoveDialog={props.onMoveDialog}
-                onDragStart={props.onDragStart}
-                onDragEnd={props.onDragEnd}
-                onDrop={props.onDrop}
-                dragOver={props.dragOver}
-                setDragOver={props.setDragOver}
-                moveTarget={props.moveTarget}
+                onMove={props.onMove}
               />
             )}
           </For>
@@ -294,7 +290,14 @@ export function FileTree(props: {
   }
 
   return (
-    <div class="file-tree">
+    <div
+      class="file-tree"
+      {...{ "on:treedrop": (e: Event) => {
+        const dest = (e as CustomEvent).detail as string;
+        const src = dragSrc();
+        if (src && dest) doMove(src, dest);
+      }}}
+    >
       <Show when={tree().length === 0}>
         <p class="muted small" style={{ padding: "0.5rem" }}>
           暂无笔记
@@ -314,15 +317,7 @@ export function FileTree(props: {
             onCreateFolder={createFolderInDir}
             onReveal={revealInExplorer}
             onMoveDialog={moveToDialog}
-            onDragStart={setMoveTarget}
-            onDragEnd={() => { setMoveTarget(null); setDragOver(null); }}
-            onDrop={(destDir) => {
-              if (moveTarget()) doMove(moveTarget()!, destDir);
-              setMoveTarget(null);
-            }}
-            dragOver={dragOver}
-            setDragOver={setDragOver}
-            moveTarget={moveTarget}
+            onMove={doMove}
           />
         )}
       </For>
