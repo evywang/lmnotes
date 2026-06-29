@@ -26,6 +26,10 @@ fn vault_dir() -> PathBuf {
 #[allow(dead_code)]
 struct HoldWatcher(Option<notify::RecommendedWatcher>);
 
+/// 保活标记：MCP server 在独立 spawn 中运行，此结构仅用于语义上标记其已启用。
+#[allow(dead_code)]
+struct HoldMcp;
+
 /// 构建默认 Registry + Routing（M1b-T10：从 config.json 加载）。
 fn build_registry_from_config() -> (Registry, Routing, GuardConfig) {
     let cfg = llm_config::Config::load_or_default();
@@ -165,6 +169,60 @@ pub fn run() {
         });
     }
 
+    // MCP server：把 vault 只读暴露给 AI agent（streamable HTTP，仅 127.0.0.1）。
+    // 复用桌面已构造的同一组 Arc 资源（零拷贝共享，无跨进程锁）。
+    let mcp_cfg = llm_config::Config::load_or_default().mcp;
+    let mcp_hold: Option<HoldMcp> = if mcp_cfg.enabled {
+        // token：配置缺省则随机生成 32 字节 hex（仅本机 loopback，非空即可）
+        let token = mcp_cfg.token.clone().unwrap_or_else(|| {
+            use rand::RngCore;
+            let mut bytes = [0u8; 32];
+            rand::rng().fill_bytes(&mut bytes);
+            hex::encode(bytes)
+        });
+        let mcp_server = lmnotes_mcp::LmnotesMcpServer::new(
+            dir.clone(),
+            engine.clone(),
+            meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>,
+            meta.clone(),
+            fulltext.clone(),
+            registry.clone(),
+            routing.clone(),
+            guard_cfg.clone(),
+        );
+        let lmnotes_home = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".lmnotes");
+        let port = mcp_cfg.port;
+        let vault_for_disc = dir.clone();
+        tauri::async_runtime::spawn(async move {
+            // 端口冲突兜底：先尝试配置端口，bind 失败则退到 :0（OS 分配）。
+            // serve() 内部 bind 成功后即写 mcp.json 发现文件并阻塞服务。
+            let candidates: [std::net::SocketAddr; 2] = [
+                format!("127.0.0.1:{port}").parse().unwrap_or(([127, 0, 0, 1], 0).into()),
+                ([127, 0, 0, 1], 0).into(),
+            ];
+            for addr in candidates {
+                match lmnotes_mcp::server::serve(
+                    mcp_server.clone(),
+                    addr,
+                    token.clone(),
+                    lmnotes_home.clone(),
+                    vault_for_disc.clone(),
+                )
+                .await
+                {
+                    Ok(_) => break,
+                    Err(e) => eprintln!("[mcp] bind {addr} failed: {e}; trying fallback :0"),
+                }
+            }
+        });
+        Some(HoldMcp)
+    } else {
+        eprintln!("[mcp] disabled by config (mcp.enabled = false)");
+        None
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(indexer)
@@ -176,6 +234,7 @@ pub fn run() {
         .manage(routing.clone())
         .manage(guard_cfg.clone())
         .manage(HoldWatcher(watcher))
+        .manage(mcp_hold)
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::search,

@@ -15,6 +15,40 @@ pub struct Config {
     pub providers: Vec<ProviderConfig>,
     pub routing: RoutingConfig,
     pub guard: GuardConfigSer,
+    /// MCP server 配置（暴露笔记给 AI agent）。向后兼容：旧 config.json 无此段时取默认。
+    #[serde(default)]
+    pub mcp: McpConfig,
+}
+
+/// MCP server（暴露 vault 给 AI agent）的配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// 是否在启动时拉起 MCP HTTP server。默认开启。
+    #[serde(default = "default_mcp_enabled")]
+    pub enabled: bool,
+    /// 绑定端口（仅 127.0.0.1）。0 = 由 OS 分配空闲端口；默认 21920。
+    #[serde(default = "default_mcp_port")]
+    pub port: u16,
+    /// Bearer token；None 则启动时随机生成并写入 ~/.lmnotes/mcp.json 发现文件。
+    #[serde(default)]
+    pub token: Option<String>,
+}
+
+fn default_mcp_enabled() -> bool {
+    true
+}
+fn default_mcp_port() -> u16 {
+    21920
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_mcp_enabled(),
+            port: default_mcp_port(),
+            token: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,6 +147,7 @@ impl Default for Config {
                 }),
             },
             guard: GuardConfigSer::default(),
+            mcp: McpConfig::default(),
         }
     }
 }
