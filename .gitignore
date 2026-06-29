@@ -3,3 +3,6 @@
 .idea/
 .vscode/
 /.playwright-mcp/
+
+# Windows reserved filename accidentally created by a redirect
+/nul
