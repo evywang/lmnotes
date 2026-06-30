@@ -5,6 +5,13 @@ on:
     tags:
       - "v*"
 
+# tauri-action creates a GitHub Release (draft) and uploads artifacts,
+# which requires write access to contents. The default GITHUB_TOKEN is
+# otherwise read-only and the release step fails with
+# "Resource not accessible by integration".
+permissions:
+  contents: write
+
 jobs:
   publish:
     strategy:
