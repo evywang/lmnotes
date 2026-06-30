@@ -1,5 +1,6 @@
 import { createSignal, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 export function Capture(props: { onClose: () => void }) {
   const [text, setText] = createSignal("");
@@ -27,7 +28,7 @@ export function Capture(props: { onClose: () => void }) {
         <textarea
           autofocus
           class="capture-input"
-          placeholder="快速记一条…（Esc 关闭，Ctrl+Enter 保存）"
+          placeholder={t("capture.placeholder")}
           value={text()}
           onInput={(e) => setText(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -36,7 +37,7 @@ export function Capture(props: { onClose: () => void }) {
           }}
         />
         <Show when={saving()}>
-          <span class="muted small">保存中…</span>
+          <span class="muted small">{t("capture.saving")}</span>
         </Show>
       </div>
     </div>

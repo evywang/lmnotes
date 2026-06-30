@@ -4,6 +4,7 @@ import { marked } from "marked";
 import { useCodeMirror } from "./solid-cm";
 import { RewriteMenu } from "./RewriteMenu";
 import type { EditorView } from "@codemirror/view";
+import { t } from "../i18n";
 
 interface ConceptFile {
   text: string;
@@ -81,13 +82,13 @@ export function Editor(props: { path: string }) {
         <button
           class={`preview-toggle ${preview() ? "active" : ""}`}
           onClick={() => setPreview((v) => !v)}
-          title="编辑/预览切换"
+          title={t("editor.toggleTooltip")}
         >
-          {preview() ? "✏️ 编辑" : "👁 预览"}
+          {preview() ? t("editor.edit") : t("editor.preview")}
         </button>
       </div>
       <div class={`editor-content-area ${preview() ? "split" : ""}`}>
-        <Show when={loaded()} fallback={<p class="muted">加载中…</p>}>
+        <Show when={loaded()} fallback={<p class="muted">{t("editor.loading")}</p>}>
           <div
             class="cm-host"
             ref={host}

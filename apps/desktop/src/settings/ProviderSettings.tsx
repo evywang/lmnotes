@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { t, locale, setLocale } from "../i18n";
 
 interface ProviderRefSer {
   provider: string;
@@ -69,15 +70,41 @@ export function ProviderSettings(props: { onClose: () => void }) {
   return (
     <div class="capture-overlay" onClick={props.onClose}>
       <div class="settings-box" onClick={(e) => e.stopPropagation()}>
-        <h2>Provider 设置</h2>
-        <Show when={config()} fallback={<p class="muted">加载中…</p>}>
+        <h2>{t("settings.title")}</h2>
+        <Show when={config()} fallback={<p class="muted">{t("settings.loading")}</p>}>
           {(cfg) => (
             <div class="settings-form">
+              {/* 通用：语言切换 */}
+              <div class="general-section">
+                <h3>{t("settings.generalSection")}</h3>
+                <div class="lang-field">
+                  <span class="lang-label">{t("settings.language")}</span>
+                  <div class="lang-toggle">
+                    <button
+                      type="button"
+                      class={locale() === "zh" ? "lang-btn active" : "lang-btn"}
+                      onClick={() => setLocale("zh")}
+                    >
+                      {t("settings.languageZh")}
+                    </button>
+                    <button
+                      type="button"
+                      class={locale() === "en" ? "lang-btn active" : "lang-btn"}
+                      onClick={() => setLocale("en")}
+                    >
+                      {t("settings.languageEn")}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <For each={cfg().providers}>
                 {(p, i) => (
                   <div class="provider-block">
                     <h3>
-                      {p.type === "ollama" ? "Ollama（本地）" : `OpenAI 兼容：${(p as { id: string }).id}`}
+                      {p.type === "ollama"
+                        ? t("settings.ollamaLocal")
+                        : t("settings.openaiCompat", { id: (p as { id: string }).id })}
                     </h3>
                     <label>
                       Base URL
@@ -134,20 +161,20 @@ export function ProviderSettings(props: { onClose: () => void }) {
               </For>
 
               <div class="health-section">
-                <h3>健康状态</h3>
+                <h3>{t("settings.health")}</h3>
                 <For each={health()}>
                   {(h) => (
                     <div class="health-item">
                       <span>{h.healthy ? "✓" : "✕"}</span>
                       <span>{h.provider_id}</span>
                       <span class="muted small">
-                        {h.healthy ? "可用" : "不可达"}
+                        {h.healthy ? t("settings.healthy") : t("settings.unhealthy")}
                       </span>
                     </div>
                   )}
                 </For>
                 <button class="btn-secondary" onClick={reprobe}>
-                  重新探测
+                  {t("settings.reprobe")}
                 </button>
               </div>
 
@@ -166,21 +193,19 @@ export function ProviderSettings(props: { onClose: () => void }) {
                       })
                     }
                   />
-                  允许云端 Provider（默认关闭，本地优先）
+                  {t("settings.cloudAllowed")}
                 </label>
               </div>
 
               <div class="settings-actions">
                 <button class="btn-primary" onClick={save} disabled={saving()}>
-                  {saving() ? "保存中…" : "保存"}
+                  {saving() ? t("settings.saving") : t("settings.save")}
                 </button>
                 <button class="btn-secondary" onClick={props.onClose}>
-                  取消
+                  {t("settings.cancel")}
                 </button>
               </div>
-              <p class="muted small">
-                保存后需重启应用生效。默认配置指向本地 Ollama（localhost:11434）。
-              </p>
+              <p class="muted small">{t("settings.restartHint")}</p>
             </div>
           )}
         </Show>

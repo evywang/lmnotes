@@ -5,6 +5,7 @@ import {
   rejectSuggestion,
   useSuggestions,
 } from "../store/llm";
+import { t } from "../i18n";
 
 export function SuggestionCenter() {
   const { suggestions } = useSuggestions();
@@ -13,7 +14,7 @@ export function SuggestionCenter() {
   return (
     <div class="suggestion-list">
       <Show when={suggestions().length === 0}>
-        <p class="muted small">暂无待审建议</p>
+        <p class="muted small">{t("suggestion.empty")}</p>
       </Show>
       <For each={suggestions()}>
         {(s) => (
@@ -37,14 +38,14 @@ export function SuggestionCenter() {
             <div class="suggestion-actions">
               <button
                 class="btn-accept"
-                title="接受 (Enter)"
+                title={t("suggestion.acceptTooltip")}
                 onClick={() => acceptSuggestion(s.id)}
               >
                 ✓
               </button>
               <button
                 class="btn-reject"
-                title="拒绝"
+                title={t("suggestion.rejectTooltip")}
                 onClick={() => rejectSuggestion(s.id)}
               >
                 ✕

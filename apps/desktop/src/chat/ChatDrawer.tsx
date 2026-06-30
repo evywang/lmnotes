@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { t } from "../i18n";
 
 interface CitationRef {
   index: number;
@@ -166,11 +167,11 @@ export function ChatDrawer(props: {
   return (
     <div class="chat-drawer">
       <div class="chat-header">
-        <h3>💬 Chat with Vault</h3>
+        <h3>{t("chat.title")}</h3>
         <div class="chat-header-actions">
           <Show when={messages().length > 0}>
-            <button class="chat-clear-btn" title="清空历史" onClick={clearHistory}>
-              清空
+            <button class="chat-clear-btn" title={t("chat.clearTooltip")} onClick={clearHistory}>
+              {t("chat.clear")}
             </button>
           </Show>
           <button class="chat-close" onClick={props.onClose}>
@@ -181,8 +182,8 @@ export function ChatDrawer(props: {
       <div class="chat-body" ref={bodyRef}>
         <Show when={messages().length === 0}>
           <div class="chat-empty">
-            <p class="muted">问我关于你笔记的任何问题…</p>
-            <p class="muted small">例如：注意力机制的公式是什么？</p>
+            <p class="muted">{t("chat.emptyPrompt")}</p>
+            <p class="muted small">{t("chat.emptyExample")}</p>
           </div>
         </Show>
         <For each={messages()}>
@@ -237,7 +238,7 @@ export function ChatDrawer(props: {
       <div class="chat-input-bar">
         <textarea
           class="chat-input"
-          placeholder="问一个问题…（Enter 发送，Shift+Enter 换行）"
+          placeholder={t("chat.inputPlaceholder")}
           value={input()}
           onInput={(e) => setInput(e.currentTarget.value)}
           onKeyDown={(e) => {

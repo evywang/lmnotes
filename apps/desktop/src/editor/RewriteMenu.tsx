@@ -1,13 +1,14 @@
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { EditorView } from "@codemirror/view";
+import { t, type MessageKey } from "../i18n";
 
 const ACTIONS = [
-  { id: "polish", label: "润色" },
-  { id: "expand", label: "扩写" },
-  { id: "translate", label: "翻译为英文" },
-  { id: "summarize", label: "总结要点" },
-] as const;
+  { id: "polish", label: "rewrite.polish" },
+  { id: "expand", label: "rewrite.expand" },
+  { id: "translate", label: "rewrite.translate" },
+  { id: "summarize", label: "rewrite.summarize" },
+] as const satisfies readonly { id: string; label: MessageKey }[];
 
 /**
  * 就地改写菜单：右键选中文本时弹出，选择动作后调 LLM，替换选区。
@@ -95,7 +96,7 @@ export function RewriteMenu(props: {
             style={{ left: `${pos().x}px`, top: `${pos().y}px` }}
           >
             <Show when={busy()}>
-              <div class="rewrite-busy">改写中…</div>
+              <div class="rewrite-busy">{t("rewrite.busy")}</div>
             </Show>
             <For each={ACTIONS}>
               {(a) => (
@@ -104,7 +105,7 @@ export function RewriteMenu(props: {
                   disabled={busy()}
                   onClick={() => perform(a.id)}
                 >
-                  {a.label}
+                  {t(a.label)}
                 </button>
               )}
             </For>

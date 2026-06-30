@@ -1,5 +1,6 @@
 import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 
 interface FileTreeNode {
   name: string;
@@ -132,35 +133,35 @@ export function FileTree(props: {
   };
 
   const deleteFile = async (path: string, name: string) => {
-    if (!confirm(`确定删除 "${name}"？此操作不可撤销。`)) return;
+    if (!confirm(t("filetree.deleteConfirm", { name }))) return;
     try {
       await invoke("delete_note", { path });
       await loadTree();
     } catch (e) {
-      alert("删除失败: " + e);
+      alert(t("filetree.deleteFailed") + e);
     }
   };
 
   const createNoteInDir = async (dir: string) => {
-    const title = window.prompt("笔记标题：", "新笔记");
+    const title = window.prompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
     if (!title) return;
     try {
       const path = await invoke<string>("create_note", { title, parentDir: dir });
       props.onOpen(path);
       await loadTree();
     } catch (e) {
-      alert("创建失败: " + e);
+      alert(t("filetree.createFailed") + e);
     }
   };
 
   const createFolderInDir = async (dir: string) => {
-    const name = window.prompt("文件夹名称：", "new-folder");
+    const name = window.prompt(t("filetree.folderNamePrompt"), t("filetree.folderNameDefault"));
     if (!name) return;
     try {
       await invoke("create_folder", { parentDir: dir, name });
       await loadTree();
     } catch (e) {
-      alert("创建失败: " + e);
+      alert(t("filetree.createFailed") + e);
     }
   };
 
@@ -168,7 +169,7 @@ export function FileTree(props: {
     try {
       await invoke("reveal_in_explorer", { relPath: path });
     } catch (e) {
-      alert("打开失败: " + e);
+      alert(t("filetree.openFailed") + e);
     }
   };
 
@@ -177,14 +178,14 @@ export function FileTree(props: {
       await invoke("move_item", { srcPath, destDir });
       await loadTree();
     } catch (e) {
-      alert("移动失败: " + e);
+      alert(t("filetree.moveFailed") + e);
     }
   };
 
   const moveToDialog = (srcPath: string, srcName: string) => {
     const dirs = collectDirs(tree()).map((d) => ({ path: d.path, name: d.name }));
     if (dirs.length === 0) {
-      alert("没有可移动到的目录");
+      alert(t("filetree.noMoveTarget"));
       return;
     }
     setMoveDialog({ srcPath, srcName, dirs });
@@ -250,14 +251,14 @@ export function FileTree(props: {
           <Show when={node.is_dir}>
             <button
               class="tree-action"
-              title="新建笔记"
+              title={t("filetree.newNoteTooltip")}
               onClick={(e) => { e.stopPropagation(); props.onCreateNote(node.path); }}
             >
               ＋
             </button>
             <button
               class="tree-action"
-              title="新建文件夹"
+              title={t("filetree.newFolderTooltip")}
               onClick={(e) => { e.stopPropagation(); props.onCreateFolder(node.path); }}
             >
               📁＋
@@ -266,7 +267,7 @@ export function FileTree(props: {
           <Show when={!node.is_dir}>
             <button
               class="tree-delete"
-              title="删除"
+              title={t("filetree.deleteTooltip")}
               onClick={(e) => {
                 e.stopPropagation();
                 props.onDelete(node.path, node.name);
@@ -304,7 +305,7 @@ export function FileTree(props: {
     <div class="file-tree">
       <Show when={tree().length === 0}>
         <p class="muted small" style={{ padding: "0.5rem" }}>
-          暂无笔记
+          {t("filetree.empty")}
         </p>
       </Show>
       <For each={tree()}>
@@ -341,28 +342,28 @@ export function FileTree(props: {
             >
               <Show when={menu().node.is_dir}>
                 <button class="ctx-item" onClick={() => { createNoteInDir(menu().node.path); setCtxMenu(null); }}>
-                  📄 新建笔记
+                  {t("filetree.ctxNewNote")}
                 </button>
                 <button class="ctx-item" onClick={() => { createFolderInDir(menu().node.path); setCtxMenu(null); }}>
-                  📁 新建文件夹
+                  {t("filetree.ctxNewFolder")}
                 </button>
                 <div class="ctx-sep" />
               </Show>
               <Show when={!menu().node.is_dir}>
                 <button class="ctx-item" onClick={() => { props.onOpen(menu().node.path); setCtxMenu(null); }}>
-                  📄 打开
+                  {t("filetree.ctxOpen")}
                 </button>
                 <div class="ctx-sep" />
                 <button class="ctx-item" onClick={() => { deleteFile(menu().node.path, menu().node.name); setCtxMenu(null); }}>
-                  🗑 删除
+                  {t("filetree.ctxDelete")}
                 </button>
                 <div class="ctx-sep" />
               </Show>
               <button class="ctx-item" onClick={() => { moveToDialog(menu().node.path, menu().node.name); setCtxMenu(null); }}>
-                ✂️ 移动到…
+                {t("filetree.ctxMove")}
               </button>
               <button class="ctx-item" onClick={() => { revealInExplorer(menu().node.path); setCtxMenu(null); }}>
-                🖥 在文件管理器中打开
+                {t("filetree.ctxReveal")}
               </button>
             </div>
           </>
@@ -374,7 +375,7 @@ export function FileTree(props: {
         {(dlg) => (
           <div class="move-overlay" onClick={() => setMoveDialog(null)}>
             <div class="move-dialog" onClick={(e) => e.stopPropagation()}>
-              <h3>移动 "{dlg().srcName}" 到</h3>
+              <h3>{t("filetree.moveDialogTitle", { name: dlg().srcName })}</h3>
               <div class="move-list">
                 <For each={dlg().dirs}>
                   {(dir) => (
@@ -391,7 +392,7 @@ export function FileTree(props: {
                 </For>
               </div>
               <button class="btn-secondary" onClick={() => setMoveDialog(null)}>
-                取消
+                {t("filetree.moveDialogCancel")}
               </button>
             </div>
           </div>

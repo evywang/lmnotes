@@ -8,6 +8,7 @@ import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { FileTree } from "./components/FileTree";
+import { t } from "./i18n";
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
@@ -35,7 +36,7 @@ export function App() {
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 
   const createNote = async () => {
-    const title = window.prompt("笔记标题：", "新笔记");
+    const title = window.prompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
     if (!title) return;
     try {
       const path = await invoke<string>("create_note", { title });
@@ -51,7 +52,7 @@ export function App() {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: "文档", extensions: ["md", "markdown", "txt", "pdf", "docx", "xlsx", "xls"] },
+        { name: t("app.importFilterName"), extensions: ["md", "markdown", "txt", "pdf", "docx", "xlsx", "xls"] },
       ],
     });
     if (!selected || typeof selected !== "string") return;
@@ -71,24 +72,24 @@ export function App() {
         <aside class="sidebar">
           <input
             class="search-input"
-            placeholder="搜索…（回车）"
+            placeholder={t("app.searchPlaceholder")}
             value={query()}
             onInput={(e) => setQuery(e.currentTarget.value)}
             onKeyDown={(e) => e.key === "Enter" && runSearch(query())}
           />
           <div class="sidebar-actions">
-            <button class="action-btn" onClick={createNote} title="新建笔记">
-              + 新建
+            <button class="action-btn" onClick={createNote} title={t("app.newNoteTooltip")}>
+              {t("app.newNoteBtn")}
             </button>
-            <button class="action-btn" onClick={importNote} title="导入 .md 文件">
-              📥 导入
+            <button class="action-btn" onClick={importNote} title={t("app.importTooltip")}>
+              {t("app.importBtn")}
             </button>
           </div>
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
-            💬 Chat with Vault (Ctrl+J)
+            {t("app.chatBtn")}
           </button>
           <Show when={searching()}>
-            <p class="muted">搜索中…</p>
+            <p class="muted">{t("app.searching")}</p>
           </Show>
           <ul class="result-list">
             <For each={results()}>
@@ -103,7 +104,7 @@ export function App() {
             </For>
           </ul>
           <Show when={!searching() && results().length === 0}>
-            <p class="muted small">输入关键词搜索笔记</p>
+            <p class="muted small">{t("app.searchHint")}</p>
           </Show>
           <div class={`tree-stack ${treeOpen() ? "tree-stack-open" : ""}`}>
             <button
@@ -111,7 +112,7 @@ export function App() {
               onClick={() => setTreeOpen((v) => !v)}
             >
               <span class="tree-stack-arrow">{treeOpen() ? "▼" : "▶"}</span>
-              <span>📁 文件</span>
+              <span>{t("app.files")}</span>
             </button>
             <Show when={treeOpen()}>
               <div class="tree-stack-body">
@@ -126,18 +127,18 @@ export function App() {
         </aside>
 
         <main class="content">
-          <Show when={activePath()} fallback={<p class="placeholder">选择左侧笔记或搜索</p>}>
+          <Show when={activePath()} fallback={<p class="placeholder">{t("app.placeholder")}</p>}>
             <Editor path={activePath()!} />
           </Show>
         </main>
 
         <aside class="backrefs">
-          <h3 class="panel-title">建议中心</h3>
+          <h3 class="panel-title">{t("app.suggestionCenter")}</h3>
           <SuggestionCenter />
         </aside>
       </div>
 
-      <button class="settings-btn" title="Provider 设置 (Ctrl+,)" onClick={() => setSettingsOpen(true)}>
+      <button class="settings-btn" title={t("app.settingsTooltip")} onClick={() => setSettingsOpen(true)}>
         ⚙
       </button>
 
