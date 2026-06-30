@@ -101,9 +101,13 @@ pub async fn serve(
         );
 
     // /mcp 路由加 Bearer 鉴权
-    let mcp_router = Router::new()
-        .nest_service("/mcp", service)
-        .layer(middleware::from_fn_with_state(token_arc.clone(), auth_middleware));
+    let mcp_router =
+        Router::new()
+            .nest_service("/mcp", service)
+            .layer(middleware::from_fn_with_state(
+                token_arc.clone(),
+                auth_middleware,
+            ));
 
     // 写发现文件（尽力而为；失败仅日志，不阻断 server）
     let discovery = DiscoveryFile {

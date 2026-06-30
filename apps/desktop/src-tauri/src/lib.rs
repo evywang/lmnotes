@@ -199,7 +199,9 @@ pub fn run() {
             // 端口冲突兜底：先尝试配置端口，bind 失败则退到 :0（OS 分配）。
             // serve() 内部 bind 成功后即写 mcp.json 发现文件并阻塞服务。
             let candidates: [std::net::SocketAddr; 2] = [
-                format!("127.0.0.1:{port}").parse().unwrap_or(([127, 0, 0, 1], 0).into()),
+                format!("127.0.0.1:{port}")
+                    .parse()
+                    .unwrap_or(([127, 0, 0, 1], 0).into()),
                 ([127, 0, 0, 1], 0).into(),
             ];
             for addr in candidates {

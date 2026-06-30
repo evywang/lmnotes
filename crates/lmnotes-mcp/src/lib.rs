@@ -31,7 +31,7 @@ use lmnotes_core::qa::prompt::SYSTEM;
 use lmnotes_core::qa::retriever::Retriever;
 use lmnotes_core::search::SearchEngine;
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
-use rmcp::{Json, ServerHandler, tool, tool_handler, tool_router};
+use rmcp::{tool, tool_handler, tool_router, Json, ServerHandler};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -200,7 +200,10 @@ impl LmnotesMcpServer {
 #[tool_router(router = tool_router)]
 impl LmnotesMcpServer {
     /// 全文检索笔记（BM25，支持中文分词）。
-    #[tool(name = "search_notes", description = "全文检索笔记。返回匹配笔记的路径、标题与相关度。")]
+    #[tool(
+        name = "search_notes",
+        description = "全文检索笔记。返回匹配笔记的路径、标题与相关度。"
+    )]
     pub async fn search_notes(
         &self,
         Parameters(req): Parameters<SearchNotesRequest>,
@@ -223,7 +226,10 @@ impl LmnotesMcpServer {
     }
 
     /// 读取单条笔记原文（含 frontmatter + markdown 正文）。
-    #[tool(name = "read_note", description = "按 vault 相对路径读取一条笔记的完整原文（markdown）。")]
+    #[tool(
+        name = "read_note",
+        description = "按 vault 相对路径读取一条笔记的完整原文（markdown）。"
+    )]
     pub async fn read_note(
         &self,
         Parameters(req): Parameters<ReadNoteRequest>,
@@ -238,7 +244,10 @@ impl LmnotesMcpServer {
     }
 
     /// 列出 vault 目录树（递归，跳过 `.lmnotes/` 与隐藏项）。
-    #[tool(name = "list_notes", description = "列出 vault 目录树（递归）。跳过 .lmnotes/ 与隐藏文件，仅含 .md 笔记。")]
+    #[tool(
+        name = "list_notes",
+        description = "列出 vault 目录树（递归）。跳过 .lmnotes/ 与隐藏文件，仅含 .md 笔记。"
+    )]
     pub async fn list_notes(
         &self,
         Parameters(req): Parameters<ListNotesRequest>,
@@ -256,7 +265,10 @@ impl LmnotesMcpServer {
     /// 复刻桌面 `chat_stream`：向量 KNN + 全文 BM25（RRF 融合）→ 拼 context
     /// （6000 字预算）→ 护栏检查 → LLM 流式输出聚合为整段返回。
     /// 流式 chunk 聚合为一次性返回（MCP tool 一次 call 一个 result）。
-    #[tool(name = "ask_vault", description = "基于检索到的笔记回答问题（RAG）。返回回答正文与引用的笔记。需要已配置可用的 LLM provider。")]
+    #[tool(
+        name = "ask_vault",
+        description = "基于检索到的笔记回答问题（RAG）。返回回答正文与引用的笔记。需要已配置可用的 LLM provider。"
+    )]
     pub async fn ask_vault(
         &self,
         Parameters(req): Parameters<AskVaultRequest>,
@@ -319,7 +331,10 @@ impl LmnotesMcpServer {
         };
 
         // 5. 流式 chat → 聚合为整段（MCP tool 一次返回）
-        let mut stream = chat.chat_stream(chat_req).await.map_err(|e| e.to_string())?;
+        let mut stream = chat
+            .chat_stream(chat_req)
+            .await
+            .map_err(|e| e.to_string())?;
         let mut full_answer = String::new();
         while let Some(chunk) = stream.next().await {
             match chunk {
@@ -351,7 +366,10 @@ impl LmnotesMcpServer {
     }
 
     /// 反向链接：哪些笔记链接到了目标笔记。
-    #[tool(name = "get_note_links", description = "查询反向链接：哪些笔记链接到了目标笔记。便于遍历知识图谱。")]
+    #[tool(
+        name = "get_note_links",
+        description = "查询反向链接：哪些笔记链接到了目标笔记。便于遍历知识图谱。"
+    )]
     pub async fn get_note_links(
         &self,
         Parameters(req): Parameters<GetNoteLinksRequest>,
@@ -457,21 +475,17 @@ fn build_tree<'a>(
 impl ServerHandler for LmnotesMcpServer {
     fn get_info(&self) -> rmcp::model::ServerInfo {
         use rmcp::model::*;
-        ServerInfo::new(
-            ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
-        )
-        .with_server_info(Implementation::new(
-            "lmnotes-mcp",
-            env!("CARGO_PKG_VERSION"),
-        ))
-        .with_instructions(
-            "只读访问 LMNotes vault（笔记知识库）。可用工具：search_notes 全文检索、\
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new(
+                "lmnotes-mcp",
+                env!("CARGO_PKG_VERSION"),
+            ))
+            .with_instructions(
+                "只读访问 LMNotes vault（笔记知识库）。可用工具：search_notes 全文检索、\
              read_note 读单条笔记原文、list_notes 列目录树、ask_vault 基于 RAG 问答、\
              get_note_links 查反向链接。所有工具均为只读，不会修改笔记。"
-                .to_string(),
-        )
+                    .to_string(),
+            )
     }
 }
 
@@ -488,9 +502,7 @@ mod tests {
     use std::sync::Arc;
 
     /// 构造测试 server：temp vault + 已索引的笔记 + 空 Registry（非 LLM 工具不需要）。
-    async fn make_server(
-        files: &[(&str, &str)],
-    ) -> (LmnotesMcpServer, tempfile::TempDir) {
+    async fn make_server(files: &[(&str, &str)]) -> (LmnotesMcpServer, tempfile::TempDir) {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().to_path_buf();
         let lmnotes_dir = root.join(".lmnotes");
