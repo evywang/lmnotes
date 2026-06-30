@@ -1,0 +1,36 @@
+# Normalize line endings to LF in the repository for all text files.
+# Contributors on any OS get LF on checkout for source code, which keeps
+# cargo fmt / rustfmt deterministic across local + CI environments.
+
+# Default: auto-detect text files, normalize to LF on commit, keep LF on checkout
+* text=auto eol=lf
+
+# Explicit LF for source code (the files that matter for fmt determinism)
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.sh    text eol=lf
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Binary files — never touch
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.icns  binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
