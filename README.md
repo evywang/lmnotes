@@ -55,7 +55,7 @@ sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicat
 
 ```bash
 # 克隆
-git clone https://github.com/lmnotes/lmnotes.git
+git clone https://github.com/evywang/lmnotes.git
 cd lmnotes
 
 # 安装前端依赖
