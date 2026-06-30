@@ -5,9 +5,6 @@
 
 #![allow(clippy::disallowed_methods)]
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
