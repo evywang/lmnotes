@@ -29,7 +29,7 @@ LMNotes 是一个 **local-first、LLM-native** 的笔记应用。它用一套机
 | **本地优先存储** | 所有数据是磁盘上的纯文件,vault = 一个目录树,删除派生索引后可完全重建 |
 | **三层混合索引** | Tantivy 全文 + sqlite-vec 向量 + SQLite 结构化,RRF 融合检索(ADR-0003) |
 | **LLM 智能建议** | 自动生成摘要/标签建议,带溯源与可回滚,用户一键接受或批量接受 |
-| **选段改写** | 选中正文调用 LLM 改写,多档语气/风格 |
+| **选段改写** | 选中正文调用 LLM 改写,支持润色 / 扩写 / 翻译为英文 / 总结要点 |
 | **Chat with Vault** | 基于全库 RAG 的问答,引用真实笔记片段作答 |
 | **MCP Agent 接入** | 桌面端内嵌只读 MCP server,Claude/Cursor/ZCode 等 host 可检索问答你的 vault |
 | **可插拔 Provider** | 支持 Ollama(全本地)与 OpenAI 兼容接口,带隐私护栏与按条目授权 |
