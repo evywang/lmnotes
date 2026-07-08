@@ -7,6 +7,7 @@ import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { ChatDrawer } from "./chat/ChatDrawer";
+import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
 import { t } from "./i18n";
 
@@ -15,6 +16,7 @@ export function App() {
   const [captureOpen, setCaptureOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [chatOpen, setChatOpen] = createSignal(false);
+  const [graphOpen, setGraphOpen] = createSignal(false);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
   const [treeOpen, setTreeOpen] = createSignal(false);
 
@@ -30,6 +32,10 @@ export function App() {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
       e.preventDefault();
       setChatOpen(true);
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "g" || e.code === "KeyG")) {
+      e.preventDefault();
+      setGraphOpen(true);
     }
   };
   window.addEventListener("keydown", onKeyDown);
@@ -87,6 +93,9 @@ export function App() {
           </div>
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
             {t("app.chatBtn")}
+          </button>
+          <button class="chat-btn" onClick={() => setGraphOpen(true)}>
+            {t("app.graphBtn")}
           </button>
           <Show when={searching()}>
             <p class="muted">{t("app.searching")}</p>
@@ -152,6 +161,16 @@ export function App() {
         <ChatDrawer
           onClose={() => setChatOpen(false)}
           onNavigate={(path) => setActivePath(path)}
+        />
+      </Show>
+      <Show when={graphOpen()}>
+        <KnowledgeGraph
+          mode="drawer"
+          onClose={() => setGraphOpen(false)}
+          onNavigate={(path) => {
+            setActivePath(path);
+            setGraphOpen(false);
+          }}
         />
       </Show>
     </>

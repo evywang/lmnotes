@@ -68,6 +68,22 @@ fn row_from_h(rs: &mut rusqlite::Rows<'_>) -> Result<Option<ConceptRow>> {
     }
 }
 
+/// 把 sqlite-vec vec0 表存储的 embedding blob（小端 f32 序列）解码为 Vec<f32>。
+fn decode_f32_blob(blob: &[u8]) -> crate::Result<Vec<f32>> {
+    if !blob.len().is_multiple_of(4) {
+        return Err(crate::CoreError::Other(format!(
+            "embedding blob length {} is not a multiple of 4",
+            blob.len()
+        )));
+    }
+    blob.chunks_exact(4)
+        .map(|chunk| {
+            let bytes: [u8; 4] = chunk.try_into().expect("chunks_exact(4) yields 4 bytes");
+            Ok(f32::from_le_bytes(bytes))
+        })
+        .collect()
+}
+
 #[async_trait]
 impl IndexBackend for SqliteIndex {
     async fn init_schema(&self) -> Result<()> {
@@ -142,6 +158,66 @@ impl IndexBackend for SqliteIndex {
         let mut stmt = conn
             .prepare("SELECT src_id, dst_id, dst_path, link_text FROM edges WHERE dst_id = ?1")?;
         let rows = stmt.query_map([dst_id], |r| {
+            Ok(EdgeRow {
+                src_id: r.get(0)?,
+                dst_id: r.get(1)?,
+                dst_path: r.get(2)?,
+                link_text: r.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    fn forward_edges(&self, src_id: &str) -> Result<Vec<EdgeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn
+            .prepare("SELECT src_id, dst_id, dst_path, link_text FROM edges WHERE src_id = ?1")?;
+        let rows = stmt.query_map([src_id], |r| {
+            Ok(EdgeRow {
+                src_id: r.get(0)?,
+                dst_id: r.get(1)?,
+                dst_path: r.get(2)?,
+                link_text: r.get(3)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    fn all_concepts(&self) -> Result<Vec<ConceptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, path, type_, title, mtime, content_hash FROM concepts ORDER BY path",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ConceptRow {
+                id: r.get(0)?,
+                path: r.get(1)?,
+                type_: r.get(2)?,
+                title: r.get(3)?,
+                mtime: r.get(4)?,
+                content_hash: r.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    fn all_edges(&self) -> Result<Vec<EdgeRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt =
+            conn.prepare("SELECT src_id, dst_id, dst_path, link_text FROM edges ORDER BY src_id")?;
+        let rows = stmt.query_map([], |r| {
             Ok(EdgeRow {
                 src_id: r.get(0)?,
                 dst_id: r.get(1)?,
@@ -368,6 +444,23 @@ impl SqliteIndex {
         Ok(out)
     }
 
+    /// 读取一个 concept 的 embedding 向量（用于查它的语义近邻）。
+    /// sqlite-vec 的 vec0 虚拟表把向量存为原始二进制 blob（小端 f32 序列），
+    /// 这里按字节解码回 Vec<f32>。若该 concept 尚未被 embed（无向量行），返回 None。
+    pub fn concept_embedding(&self, id: &str) -> crate::Result<Option<Vec<f32>>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT embedding FROM vec_concepts WHERE id = ?1")?;
+        let mut rows = stmt.query_map([id], |r| {
+            let blob: Vec<u8> = r.get(0)?;
+            Ok(blob)
+        })?;
+        match rows.next() {
+            None => Ok(None),
+            Some(Err(e)) => Err(e.into()),
+            Some(Ok(blob)) => decode_f32_blob(&blob).map(Some),
+        }
+    }
+
     // ============ Chat History（M1c 增强：多轮对话持久化）============
 
     pub fn append_chat_history(
@@ -510,6 +603,88 @@ mod tests {
         // 替换 nt_1 出边，不应影响 nt_3 的出边
         idx.replace_edges("nt_1", vec![]).await.unwrap();
         assert_eq!(idx.backrefs("nt_2").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn forward_edges_returns_outgoing() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.upsert_concept(row("nt_1", "a.md")).await.unwrap();
+        idx.upsert_concept(row("nt_2", "b.md")).await.unwrap();
+        idx.upsert_concept(row("nt_3", "c.md")).await.unwrap();
+        idx.replace_edges(
+            "nt_1",
+            vec![
+                EdgeRow {
+                    src_id: "nt_1".into(),
+                    dst_id: Some("nt_2".into()),
+                    dst_path: "/b.md".into(),
+                    link_text: None,
+                },
+                EdgeRow {
+                    src_id: "nt_1".into(),
+                    dst_id: Some("nt_3".into()),
+                    dst_path: "/c.md".into(),
+                    link_text: None,
+                },
+            ],
+        )
+        .await
+        .unwrap();
+        let out = idx.forward_edges("nt_1").unwrap();
+        assert_eq!(out.len(), 2, "nt_1 应有 2 条出链");
+        // 对称性：backrefs(nt_2) 也应看到这条边
+        assert_eq!(idx.backrefs("nt_2").unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn all_concepts_returns_every_row() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.upsert_concept(row("nt_1", "a.md")).await.unwrap();
+        idx.upsert_concept(row("nt_2", "notes/b.md")).await.unwrap();
+        let all = idx.all_concepts().unwrap();
+        assert_eq!(all.len(), 2);
+        // 按 path 排序，notes/b.md 排在 a.md 之后
+        assert_eq!(all[0].path, "a.md");
+        assert_eq!(all[1].path, "notes/b.md");
+    }
+
+    #[tokio::test]
+    async fn all_edges_returns_full_adjacency() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.upsert_concept(row("nt_1", "a.md")).await.unwrap();
+        idx.upsert_concept(row("nt_2", "b.md")).await.unwrap();
+        idx.replace_edges(
+            "nt_1",
+            vec![EdgeRow {
+                src_id: "nt_1".into(),
+                dst_id: Some("nt_2".into()),
+                dst_path: "/b.md".into(),
+                link_text: Some("see b".into()),
+            }],
+        )
+        .await
+        .unwrap();
+        let edges = idx.all_edges().unwrap();
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].link_text.as_deref(), Some("see b"));
+    }
+
+    #[tokio::test]
+    async fn concept_embedding_round_trip() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema_with_vec_dim(3).await.unwrap();
+        idx.upsert_concept(row("nt_1", "a.md")).await.unwrap();
+        // 未 embed 时返回 None
+        assert!(idx.concept_embedding("nt_1").unwrap().is_none());
+        // 写入向量后能读回
+        let v = vec![0.1, 0.2, 0.3];
+        idx.upsert_vector("nt_1", &v).unwrap();
+        let got = idx.concept_embedding("nt_1").unwrap().unwrap();
+        assert_eq!(got.len(), 3);
+        assert!((got[0] - 0.1).abs() < 1e-6);
     }
 
     #[tokio::test]

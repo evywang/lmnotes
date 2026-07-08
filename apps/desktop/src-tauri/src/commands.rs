@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use lmnotes_core::backend::IndexBackend;
+use lmnotes_core::graph::{self, EdgeKind, GraphData};
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
 use lmnotes_core::indexer::Indexer;
@@ -952,4 +953,92 @@ pub async fn delete_note(path: String, indexer: State<'_, Arc<Indexer>>) -> Resu
         .await
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ============ 知识图谱命令（FR-SEARCH-03）============
+
+/// 图谱节点 DTO（扁平，snake_case 供前端 invoke 直接消费）。
+#[derive(serde::Serialize)]
+pub struct GraphNodeDto {
+    pub id: String,
+    pub title: String,
+    pub path: String,
+}
+
+/// 图谱边 DTO。
+#[derive(serde::Serialize)]
+pub struct GraphEdgeDto {
+    pub src: String,
+    pub dst: String,
+    /// "explicit"（用户手写链接）| "semantic"（向量近邻）。
+    pub kind: &'static str,
+    /// 权重（显式=1.0；语义=相似度）。
+    pub weight: f32,
+}
+
+/// 完整图谱 DTO。
+#[derive(serde::Serialize)]
+pub struct GraphDto {
+    pub nodes: Vec<GraphNodeDto>,
+    pub edges: Vec<GraphEdgeDto>,
+}
+
+impl From<GraphData> for GraphDto {
+    fn from(data: GraphData) -> Self {
+        let nodes = data
+            .nodes
+            .into_iter()
+            .map(|n| GraphNodeDto {
+                id: n.id,
+                title: n.title,
+                path: n.path,
+            })
+            .collect();
+        let edges = data
+            .edges
+            .into_iter()
+            .map(|e| GraphEdgeDto {
+                src: e.src,
+                dst: e.dst,
+                kind: match e.kind {
+                    EdgeKind::Explicit => "explicit",
+                    EdgeKind::Semantic => "semantic",
+                },
+                weight: e.weight,
+            })
+            .collect();
+        GraphDto { nodes, edges }
+    }
+}
+
+/// 全库图谱：全部节点 + 全部显式链接边。
+/// 不含语义近邻边（语义边由 graph_neighborhood 按需展开）。
+#[tauri::command]
+pub fn graph_full(sqlite: State<'_, Arc<SqliteIndex>>) -> Result<GraphDto, String> {
+    let idx: &SqliteIndex = sqlite.inner();
+    let data = graph::build_full_graph(idx).map_err(|e| e.to_string())?;
+    Ok(GraphDto::from(data))
+}
+
+/// 单点子图：focus 笔记的出链 + 入链 + 语义近邻。
+/// `concept_id` 接受 concept id 或 path（前端只持有 path，这里优先按 path 反查）。
+/// `k`/`threshold` 为 None 时用核心库默认值。
+#[tauri::command]
+pub fn graph_neighborhood(
+    concept_id: String,
+    k: Option<usize>,
+    threshold: Option<f32>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<GraphDto, String> {
+    let idx: &SqliteIndex = sqlite.inner();
+    // 前端传入的通常是 path；优先按 path 解析成 concept id（与 MCP get_note_links 一致）。
+    let id = match idx.get_concept(&concept_id) {
+        Ok(Some(c)) => c.id, // 已是合法 id
+        _ => match idx.get_concept_by_path(&concept_id) {
+            Ok(Some(c)) => c.id,     // 是 path，反查到 id
+            _ => concept_id.clone(), // 都查不到，原样传下去（返回空子图）
+        },
+    };
+    let data = graph::build_neighborhood(idx, idx, &id, k, threshold).map_err(|e| e.to_string())?;
+    Ok(GraphDto::from(data))
 }

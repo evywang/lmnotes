@@ -51,4 +51,14 @@ pub trait IndexBackend: Send + Sync {
 
     /// 反向链接查询：谁链接到了 dst_id（同步）。
     fn backrefs(&self, dst_id: &str) -> Result<Vec<EdgeRow>>;
+
+    /// 出链查询：src_id 链接到了哪些笔记（同步）。
+    /// backrefs 的对称补全，复用已有索引 idx_edges_src（ADR-0003）。
+    fn forward_edges(&self, src_id: &str) -> Result<Vec<EdgeRow>>;
+
+    /// 全部 concept 节点（图谱节点集，同步）。
+    fn all_concepts(&self) -> Result<Vec<ConceptRow>>;
+
+    /// 全部边（显式链接邻接表全量，同步）。
+    fn all_edges(&self) -> Result<Vec<EdgeRow>>;
 }

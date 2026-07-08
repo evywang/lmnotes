@@ -20,6 +20,7 @@ export const en = {
   "app.placeholder": "Select a note on the left or search",
   "app.suggestionCenter": "Suggestion Center",
   "app.settingsTooltip": "Provider Settings (Ctrl+,)",
+  "app.graphBtn": "🕸 Knowledge Graph (Ctrl+G)",
 
   // ── Capture ───────────────────────────────────────────────────────────
   "capture.placeholder": "Quick note… (Esc to close, Ctrl+Enter to save)",
@@ -93,6 +94,20 @@ export const en = {
   "filetree.noMoveTarget": "No folder to move to",
   "filetree.moveDialogTitle": 'Move "{name}" to',
   "filetree.moveDialogCancel": "Cancel",
+
+  // ── Knowledge graph ──────────────────────────────────────────────────
+  "graph.titleDrawer": "🕸 Note Neighborhood",
+  "graph.titleFull": "🕸 Knowledge Graph",
+  "graph.fullView": "Full graph",
+  "graph.fullViewTooltip": "Show the whole vault graph",
+  "graph.relayout": "Re-layout",
+  "graph.relayoutTooltip": "Recompute graph layout",
+  "graph.loading": "Loading graph…",
+  "graph.empty": "No notes to graph yet",
+  "graph.explicitEdge": "Explicit link",
+  "graph.semanticEdge": "Semantic neighbor",
+  "graph.nodes": "nodes",
+  "graph.edges": "edges",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

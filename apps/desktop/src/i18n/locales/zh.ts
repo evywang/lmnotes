@@ -21,6 +21,7 @@ export const zh: Record<MessageKey, string> = {
   "app.placeholder": "选择左侧笔记或搜索",
   "app.suggestionCenter": "建议中心",
   "app.settingsTooltip": "Provider 设置 (Ctrl+,)",
+  "app.graphBtn": "🕸 知识图谱 (Ctrl+G)",
 
   // ── Capture ───────────────────────────────────────────────────────────
   "capture.placeholder": "快速记一条…（Esc 关闭，Ctrl+Enter 保存）",
@@ -92,4 +93,18 @@ export const zh: Record<MessageKey, string> = {
   "filetree.noMoveTarget": "没有可移动到的目录",
   "filetree.moveDialogTitle": "移动 \"{name}\" 到",
   "filetree.moveDialogCancel": "取消",
+
+  // ── 知识图谱 ──────────────────────────────────────────────────────────
+  "graph.titleDrawer": "🕸 笔记关联",
+  "graph.titleFull": "🕸 知识图谱",
+  "graph.fullView": "全库图谱",
+  "graph.fullViewTooltip": "展示整个 vault 的图谱",
+  "graph.relayout": "重新布局",
+  "graph.relayoutTooltip": "重新计算图谱布局",
+  "graph.loading": "加载图谱中…",
+  "graph.empty": "暂无可显示的笔记",
+  "graph.explicitEdge": "显式链接",
+  "graph.semanticEdge": "语义近邻",
+  "graph.nodes": "节点",
+  "graph.edges": "边",
 };

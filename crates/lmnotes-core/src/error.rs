@@ -22,6 +22,9 @@ pub enum CoreError {
 
     #[error("UTF-8 decode error: {0}")]
     Utf8(#[from] std::str::Utf8Error),
+
+    #[error("{0}")]
+    Other(String),
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;
