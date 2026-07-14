@@ -90,4 +90,44 @@ mod tests {
             GuardDecision::Allow
         );
     }
+
+    // ── 语音转录路径（ADR-0006）──────────────────────────────────────────
+    // 音频 bytes 不可字符串扫描，create_voice_note 传空 content + local_only=false，
+    // 仅依赖 cloud_allowed 闸门。这几条固化该契约。
+
+    #[test]
+    fn voice_path_blocked_when_cloud_not_allowed() {
+        // 默认配置（local-first）：云端 Whisper 应被拒。
+        let guard = GuardConfig::default(); // cloud_allowed = false
+        assert!(matches!(
+            check(&guard, ProviderKind::Cloud, "", false),
+            GuardDecision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn voice_path_allowed_when_cloud_authorized() {
+        // 用户显式开启 cloud_allowed：转录放行。
+        let guard = GuardConfig {
+            cloud_allowed: true,
+            sensitive_patterns: vec![],
+        };
+        assert_eq!(
+            check(&guard, ProviderKind::Cloud, "", false),
+            GuardDecision::Allow
+        );
+    }
+
+    #[test]
+    fn voice_path_sensitive_pattern_does_not_block_empty_content() {
+        // 空内容不会误命中敏感词（即便配了敏感词表）——语音护栏的已知简化。
+        let guard = GuardConfig {
+            cloud_allowed: true,
+            sensitive_patterns: vec!["密码".into()],
+        };
+        assert_eq!(
+            check(&guard, ProviderKind::Cloud, "", false),
+            GuardDecision::Allow
+        );
+    }
 }
