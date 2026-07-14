@@ -15,6 +15,7 @@ bitflags::bitflags! {
     pub struct Capabilities: u8 {
         const CHAT = 1 << 0;
         const EMBED = 1 << 1;
+        const TRANSCRIBE = 1 << 2;
     }
 }
 
@@ -70,4 +71,30 @@ pub trait ChatCap: LlmProvider {
 #[async_trait]
 pub trait EmbedCap: LlmProvider {
     async fn embed(&self, model: &str, texts: &[String]) -> Result<Vec<Vec<f32>>>;
+}
+
+/// 音频转录输入：bytes + mime + 文件名（multipart 上传用）。
+#[derive(Debug, Clone)]
+pub struct AudioInput {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+    pub filename: String,
+}
+
+/// 转录结果。
+#[derive(Debug, Clone)]
+pub struct Transcript {
+    pub text: String,
+}
+
+/// 转录能力 trait（ADR-0005 §1）。Whisper 兼容端点按需实现。
+#[async_trait]
+pub trait TranscribeCap: LlmProvider {
+    /// 转录音频。`language` 为 ISO-639-1（如 "zh"/"en"），None 表示自动检测。
+    async fn transcribe(
+        &self,
+        audio: AudioInput,
+        model: &str,
+        language: Option<&str>,
+    ) -> Result<Transcript>;
 }

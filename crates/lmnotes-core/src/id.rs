@@ -13,6 +13,14 @@ pub fn new_note_id(at: NaiveDateTime) -> String {
     format!("nt_{}_{}", at.format("%Y%m%d_%H%M"), suffix)
 }
 
+/// 生成资源 ID（PRD §3.4 / §3.5）：`at_<slug>_<4位base32>`。
+/// 用于音频/转录稿等资源的 concept（如 `type: transcript` 的 `id` 字段）。
+/// slug 由调用方提供（如 "voice"、"meeting"），不强校验字符集——资源 slug 可含中文。
+pub fn new_resource_id(slug: &str) -> String {
+    let suffix = random_suffix(4);
+    format!("at_{}_{}", slug.to_lowercase(), suffix)
+}
+
 /// 校验 ID 是否符合 LMNotes 格式（前缀 + 时间 + 4位base32）。
 ///
 /// 结构：`nt_<YYYYMMDD>_<HHMM>_<4位Crockford>`。datetime 段本身含一个下划线，
@@ -72,6 +80,24 @@ mod tests {
                 && !suffix.contains('O')
                 && !suffix.contains('U')
         );
+    }
+
+    #[test]
+    fn resource_id_format_is_correct() {
+        let id = new_resource_id("voice");
+        assert!(
+            id.starts_with("at_voice_"),
+            "expected at_voice_ prefix, got {id}"
+        );
+        let suffix = &id["at_voice_".len()..];
+        assert_eq!(suffix.len(), 4);
+        assert!(suffix.bytes().all(|b| CROCKFORD.contains(&b)));
+    }
+
+    #[test]
+    fn resource_id_lowercases_slug() {
+        let id = new_resource_id("Meeting");
+        assert!(id.starts_with("at_meeting_"), "got {id}");
     }
 
     #[test]

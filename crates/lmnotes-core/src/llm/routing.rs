@@ -12,6 +12,7 @@ pub enum Task {
     Embed,
     Chat,
     Rewrite,
+    Transcribe,
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +33,7 @@ pub struct Registry {
     providers: HashMap<String, Arc<dyn LlmProvider>>,
     chats: HashMap<String, Arc<dyn ChatCap>>,
     embeds: HashMap<String, Arc<dyn EmbedCap>>,
+    transcribes: HashMap<String, Arc<dyn TranscribeCap>>,
 }
 
 impl Registry {
@@ -40,6 +42,7 @@ impl Registry {
             providers: HashMap::new(),
             chats: HashMap::new(),
             embeds: HashMap::new(),
+            transcribes: HashMap::new(),
         }
     }
 
@@ -110,6 +113,46 @@ impl Registry {
         }
         Err(crate::CoreError::Conformance(format!(
             "no embed provider for task {task:?}"
+        )))
+    }
+
+    /// 注册一个 transcribe provider。
+    pub fn register_transcribe<P>(&mut self, p: P)
+    where
+        P: LlmProvider + TranscribeCap + 'static,
+    {
+        let arc = Arc::new(p);
+        self.register_transcribe_arc(arc);
+    }
+
+    /// 注册一个已有 Arc 的 transcribe provider（用于同一实例同时注册多种能力）。
+    pub fn register_transcribe_arc<P>(&mut self, arc: Arc<P>)
+    where
+        P: LlmProvider + TranscribeCap + 'static,
+    {
+        let id = arc.id().to_string();
+        self.transcribes.insert(id.clone(), arc.clone());
+        self.providers.insert(id, arc);
+    }
+
+    /// 按任务取 transcribe provider（首选 → 降级备选）。返回 (provider_arc, model)。
+    pub fn transcribe_for(
+        &self,
+        routing: &Routing,
+        task: Task,
+    ) -> Result<(Arc<dyn TranscribeCap>, String)> {
+        let (primary, fallbacks) = routing.map.get(&task).ok_or_else(|| {
+            crate::CoreError::Conformance(format!("no routing for task {task:?}"))
+        })?;
+        for pref in std::iter::once(primary).chain(fallbacks.iter()) {
+            if let Some(p) = self.transcribes.get(&pref.provider_id) {
+                return Ok((p.clone(), pref.model.clone()));
+            }
+        }
+        Err(crate::CoreError::Conformance(format!(
+            "no transcribe provider for task {task:?} (tried {} + {} fallbacks)",
+            primary.provider_id,
+            fallbacks.len()
         )))
     }
 
@@ -194,5 +237,77 @@ mod tests {
         let reg = Registry::new();
         let r = routing(Task::Chat, "absent", &["also-absent"]);
         assert!(reg.chat_for(&r, Task::Chat).is_err());
+    }
+
+    // ── Transcribe 能力（T1）──────────────────────────────────────────────
+    use super::super::provider::{AudioInput, Transcript};
+
+    struct FakeTranscribe;
+    #[async_trait]
+    impl LlmProvider for FakeTranscribe {
+        fn id(&self) -> &str {
+            "fake-tr"
+        }
+        fn kind(&self) -> ProviderKind {
+            ProviderKind::Cloud
+        }
+        fn capabilities(&self) -> Capabilities {
+            Capabilities::TRANSCRIBE
+        }
+        async fn health(&self) -> Result<bool> {
+            Ok(true)
+        }
+    }
+    #[async_trait]
+    impl TranscribeCap for FakeTranscribe {
+        async fn transcribe(
+            &self,
+            _audio: AudioInput,
+            _model: &str,
+            _language: Option<&str>,
+        ) -> Result<Transcript> {
+            Ok(Transcript {
+                text: "hello".into(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn resolves_primary_transcribe() {
+        let mut reg = Registry::new();
+        reg.register_transcribe(FakeTranscribe);
+        let r = routing(Task::Transcribe, "fake-tr", &[]);
+        let (p, _) = reg.transcribe_for(&r, Task::Transcribe).unwrap();
+        assert_eq!(p.id(), "fake-tr");
+        // 验证能力可调用
+        let t = p
+            .transcribe(
+                AudioInput {
+                    bytes: vec![0],
+                    mime: "audio/webm".into(),
+                    filename: "x.webm".into(),
+                },
+                "m",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(t.text, "hello");
+    }
+
+    #[test]
+    fn fallback_when_primary_missing_transcribe() {
+        let mut reg = Registry::new();
+        reg.register_transcribe(FakeTranscribe);
+        let r = routing(Task::Transcribe, "absent", &["fake-tr"]);
+        let (p, _) = reg.transcribe_for(&r, Task::Transcribe).unwrap();
+        assert_eq!(p.id(), "fake-tr");
+    }
+
+    #[test]
+    fn errors_when_all_missing_transcribe() {
+        let reg = Registry::new();
+        let r = routing(Task::Transcribe, "absent", &["also-absent"]);
+        assert!(reg.transcribe_for(&r, Task::Transcribe).is_err());
     }
 }
