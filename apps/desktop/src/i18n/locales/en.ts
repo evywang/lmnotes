@@ -21,10 +21,20 @@ export const en = {
   "app.suggestionCenter": "Suggestion Center",
   "app.settingsTooltip": "Provider Settings (Ctrl+,)",
   "app.graphBtn": "🕸 Knowledge Graph (Ctrl+G)",
+  "app.voiceBtn": "🎤 Voice",
+  "app.voiceTooltip": "Voice input → transcript note (Ctrl+Shift+V)",
 
   // ── Capture ───────────────────────────────────────────────────────────
   "capture.placeholder": "Quick note… (Esc to close, Ctrl+Enter to save)",
   "capture.saving": "Saving…",
+
+  // ── Voice input (FR-CAP-05) ───────────────────────────────────────────
+  "voice.title": "🎤 Voice Note",
+  "voice.start": "Start recording",
+  "voice.recording": "● Recording… {sec}s (click to stop)",
+  "voice.processing": "Transcribing…",
+  "voice.permissionDenied": "Microphone permission denied.",
+  "voice.errorTranscribe": "Transcription failed: {msg}",
 
   // ── Chat drawer ───────────────────────────────────────────────────────
   "chat.title": "💬 Chat with Vault",
@@ -57,6 +67,8 @@ export const en = {
   "settings.unhealthy": "Unreachable",
   "settings.reprobe": "Re-probe",
   "settings.cloudAllowed": "Allow cloud providers (off by default, local first)",
+  "settings.transcribeModel": "Transcribe Model (optional)",
+  "settings.transcribeModelPlaceholder": "e.g. whisper-1 (enables voice input)",
   "settings.saving": "Saving…",
   "settings.save": "Save",
   "settings.cancel": "Cancel",

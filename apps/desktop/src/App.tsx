@@ -6,6 +6,7 @@ import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
+import { VoiceCapture } from "./voice/VoiceCapture";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
@@ -14,6 +15,7 @@ import { t } from "./i18n";
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
+  const [voiceOpen, setVoiceOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [chatOpen, setChatOpen] = createSignal(false);
   const [graphOpen, setGraphOpen] = createSignal(false);
@@ -36,6 +38,15 @@ export function App() {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "g" || e.code === "KeyG")) {
       e.preventDefault();
       setGraphOpen(true);
+    }
+    // 语音输入：Ctrl/Cmd+Shift+V（避开 Ctrl+V 粘贴）
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      e.shiftKey &&
+      (e.key.toLowerCase() === "v" || e.code === "KeyV")
+    ) {
+      e.preventDefault();
+      setVoiceOpen(true);
     }
   };
   window.addEventListener("keydown", onKeyDown);
@@ -89,6 +100,13 @@ export function App() {
             </button>
             <button class="action-btn" onClick={importNote} title={t("app.importTooltip")}>
               {t("app.importBtn")}
+            </button>
+            <button
+              class="action-btn"
+              onClick={() => setVoiceOpen(true)}
+              title={t("app.voiceTooltip")}
+            >
+              {t("app.voiceBtn")}
             </button>
           </div>
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
@@ -153,6 +171,15 @@ export function App() {
 
       <Show when={captureOpen()}>
         <Capture onClose={() => setCaptureOpen(false)} />
+      </Show>
+      <Show when={voiceOpen()}>
+        <VoiceCapture
+          onClose={() => setVoiceOpen(false)}
+          onNavigate={(path) => {
+            setActivePath(path);
+            setTreeRefresh((n) => n + 1);
+          }}
+        />
       </Show>
       <Show when={settingsOpen()}>
         <ProviderSettings onClose={() => setSettingsOpen(false)} />

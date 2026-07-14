@@ -22,10 +22,20 @@ export const zh: Record<MessageKey, string> = {
   "app.suggestionCenter": "建议中心",
   "app.settingsTooltip": "Provider 设置 (Ctrl+,)",
   "app.graphBtn": "🕸 知识图谱 (Ctrl+G)",
+  "app.voiceBtn": "🎤 语音",
+  "app.voiceTooltip": "语音输入 → 转录笔记 (Ctrl+Shift+V)",
 
   // ── Capture ───────────────────────────────────────────────────────────
   "capture.placeholder": "快速记一条…（Esc 关闭，Ctrl+Enter 保存）",
   "capture.saving": "保存中…",
+
+  // ── 语音输入 (FR-CAP-05) ──────────────────────────────────────────────
+  "voice.title": "🎤 语音笔记",
+  "voice.start": "开始录音",
+  "voice.recording": "● 录音中… {sec}s（点击停止）",
+  "voice.processing": "转录中…",
+  "voice.permissionDenied": "已拒绝麦克风权限。",
+  "voice.errorTranscribe": "转录失败：{msg}",
 
   // ── Chat drawer ───────────────────────────────────────────────────────
   "chat.title": "💬 Chat with Vault",
@@ -58,6 +68,8 @@ export const zh: Record<MessageKey, string> = {
   "settings.unhealthy": "不可达",
   "settings.reprobe": "重新探测",
   "settings.cloudAllowed": "允许云端 Provider（默认关闭，本地优先）",
+  "settings.transcribeModel": "转录模型（可选）",
+  "settings.transcribeModelPlaceholder": "如 whisper-1（填后启用语音输入）",
   "settings.saving": "保存中…",
   "settings.save": "保存",
   "settings.cancel": "取消",

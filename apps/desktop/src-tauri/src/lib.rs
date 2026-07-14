@@ -244,6 +244,8 @@ pub fn run() {
             commands::save_concept,
             commands::quick_capture,
             commands::insert_image,
+            commands::insert_audio,
+            commands::create_voice_note,
             commands::list_suggestions,
             commands::accept_suggestion,
             commands::reject_suggestion,

@@ -18,6 +18,7 @@ tauri = { workspace = true, features = [] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "fs", "net"] }
 dirs = "5"
 chrono = "0.4"

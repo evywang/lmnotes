@@ -152,12 +152,20 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
 /// 返回 bundle-relative 路径（带前导 /），供前端插入 markdown 图片链接。
 #[tauri::command]
 pub async fn insert_image(data: Vec<u8>, ext: String) -> Result<String, String> {
+    let (rel, _) = archive_binary(&data, &ext, "img").await?;
+    Ok(rel)
+}
+
+/// 二进制归档：按 SHA-256 哈希存 assets/<kind>/<前2位>/<hash>.<ext>（去重）。
+/// kind ∈ {img, audio}。返回 (bundle-relative 路径带前导 /, hex 哈希)。
+/// insert_image（图片）与 insert_audio / create_voice_note（音频）共用。
+async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, String), String> {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
-    h.update(&data);
+    h.update(data);
     let hash = hex::encode(h.finalize());
     let prefix = &hash[..2];
-    let rel = format!("assets/img/{prefix}/{hash}.{ext}");
+    let rel = format!("assets/{kind}/{prefix}/{hash}.{ext}");
     let full = vault_root().join(&rel);
     if !full.exists() {
         if let Some(p) = full.parent() {
@@ -165,11 +173,19 @@ pub async fn insert_image(data: Vec<u8>, ext: String) -> Result<String, String> 
                 .await
                 .map_err(|e| e.to_string())?;
         }
-        tokio::fs::write(&full, &data)
+        tokio::fs::write(&full, data)
             .await
             .map_err(|e| e.to_string())?;
     }
-    Ok(format!("/{rel}"))
+    Ok((format!("/{rel}"), hash))
+}
+
+/// 插入音频：存 assets/audio/<前2位>/<hash>.<ext>（去重），返回带前导 / 的相对路径。
+/// 原子能力，FR-CAP-04 拖拽音频与 create_voice_note 均复用。
+#[tauri::command]
+pub async fn insert_audio(data: Vec<u8>, ext: String) -> Result<String, String> {
+    let (rel, _) = archive_binary(&data, &ext, "audio").await?;
+    Ok(rel)
 }
 
 // ============ 建议中心命令（T8）============
@@ -493,6 +509,149 @@ pub async fn create_note(title: String, parent_dir: Option<String>) -> Result<St
     tokio::fs::write(&full, &content)
         .await
         .map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// 语音转录笔记（FR-CAP-05 + FR-MEDIA-01）：
+/// 1) 音频 SHA-256 去重归档到 assets/audio/
+/// 2) 经路由取 transcribe provider（云端 Whisper 兼容）
+/// 3) 过三层护栏（音频不可字符串扫描，仅 cloud_allowed + local_only 闸）
+/// 4) 调转录 → 写 type: transcript concept 到 transcripts/（含 resource/duration_ms/mime/transcribed_by）
+/// 5) 增量索引 + 后台生成 LLM 建议
+/// 返回 transcript concept 的 vault-relative 路径（前端打开）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_voice_note(
+    audio: Vec<u8>,
+    ext: String,
+    mime: String,
+    duration_ms: u64,
+    language: Option<String>,
+    title: Option<String>,
+    indexer: State<'_, Arc<Indexer>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    use chrono::Utc;
+    use lmnotes_core::id::new_resource_id;
+    use lmnotes_core::llm::provider::AudioInput;
+    use lmnotes_core::okf::concept::Concept;
+    use lmnotes_core::okf::frontmatter::Frontmatter;
+    use std::collections::BTreeMap;
+
+    // 1) 归档音频
+    let (asset_rel, hash) = archive_binary(&audio, &ext, "audio").await?;
+    let now = Utc::now();
+
+    // 2) 取 transcribe provider（首选→降级）
+    let (transcriber, model) = registry
+        .transcribe_for(&routing, Task::Transcribe)
+        .map_err(|e| e.to_string())?;
+    let provider_id = transcriber.id().to_string();
+
+    // 3) 护栏：音频不可字符串扫描，传空串；依赖 cloud_allowed + local_only 两道闸。
+    //    此路径无源 concept，local_only 恒 false。云端默认被 cloud_allowed=false 拒。
+    match check(&guard_cfg, transcriber.kind(), "", false) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+
+    // 4) 转录（mime 克隆一份，转录消费一份，frontmatter 存一份）
+    let filename = format!("{hash}.{ext}");
+    let mime_for_meta = mime.clone();
+    let tr = transcriber
+        .transcribe(
+            AudioInput {
+                bytes: audio,
+                mime,
+                filename,
+            },
+            &model,
+            language.as_deref(),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 5) 构建 transcript concept（PRD §3.5 完整形态）
+    let ts_display = now.format("%Y-%m-%d %H:%M").to_string();
+    let title = title.unwrap_or_else(|| format!("Voice note {ts_display}"));
+    let mut extra = BTreeMap::new();
+    extra.insert(
+        "duration_ms".into(),
+        serde_yaml::Value::Number(duration_ms.into()),
+    );
+    extra.insert("mime".into(), serde_yaml::Value::String(mime_for_meta));
+    extra.insert(
+        "transcribed_by".into(),
+        serde_yaml::Value::String(format!("{model}@{provider_id}")),
+    );
+    let fm = Frontmatter {
+        type_: "transcript".into(),
+        title: Some(title.clone()),
+        description: None,
+        resource: Some(asset_rel),
+        tags: vec!["voice".into()],
+        timestamp: Some(now),
+        id: Some(new_resource_id("voice")),
+        aliases: vec![],
+        status: None,
+        language,
+        created: Some(now),
+        extra,
+    };
+    let body = format!("# {title}\n\n{}\n", tr.text.trim());
+    let concept = Concept {
+        frontmatter: fm,
+        body,
+    };
+    let text = concept.to_string();
+
+    // 6) 写 transcripts/<slug>-<YYYYMMDD>.md（slug 逻辑同 create_note）
+    let slug: String = title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        "voice".to_string()
+    } else {
+        slug
+    };
+    let date = now.format("%Y%m%d").to_string();
+    let path = format!("transcripts/{slug}-{date}.md");
+    let full = vault_root().join(&path);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 7) 增量索引 + 后台 LLM 建议（复刻 lib.rs watcher 分支）
+    if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
+        eprintln!("voice note index fail {path}: {e}");
+    }
+    let sqlite_c = sqlite.inner().clone();
+    let reg_c = registry.inner().clone();
+    let routing_c = routing.inner().clone();
+    let guard_c = guard_cfg.inner().clone();
+    let path_c = path.clone();
+    let text_c = text.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = lmnotes_core::indexer::generate_suggestions(
+            &concept, &path_c, &sqlite_c, &reg_c, &routing_c, &guard_c, &text_c,
+        )
+        .await
+        {
+            eprintln!("voice note suggestion fail {path_c}: {e}");
+        }
+    });
+
     Ok(path)
 }
 
