@@ -35,6 +35,7 @@ LMNotes 是一个 **local-first、LLM-native** 的笔记应用。它用一套机
 | **可插拔 Provider** | 支持 Ollama(全本地)与 OpenAI 兼容接口,带隐私护栏与按条目授权 |
 | **文件树管理** | 拖拽移动、右键菜单(新建/删除/在资源管理器中显示)、文件夹组织 |
 | **快速捕获** | 全局快捷键弹窗,随手记下素材即时归位 |
+| **语音输入** | 麦克风录音→云端 Whisper 转录→transcript 笔记(音频去重归档,Ctrl+Shift+V) |
 
 ## 🚀 快速开始
 
@@ -90,7 +91,7 @@ cargo run -p lmnotes-cli -- --help
 | [OKF 规范 v0.1](docs/okf/SPEC.v0.1.md) | LMNotes 遵循的开放知识格式(本地存档) |
 | [MCP Agent 接入指南](docs/mcp-agent-integration.md) | 让 Claude/Cursor 等 host 读写你的 vault |
 | [MCP API 参考](docs/mcp-api.md) | MCP server 工具清单与协议细节 |
-| [架构决策记录 (ADR)](docs/adr/) | 5 篇 ADR:核心边界、三层索引、前端栈、Provider 护栏 |
+| [架构决策记录 (ADR)](docs/adr/) | 6 篇 ADR:核心边界、三层索引、前端栈、Provider 护栏、语音转录 |
 
 ## 🏗️ 架构
 

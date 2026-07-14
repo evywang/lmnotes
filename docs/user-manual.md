@@ -17,6 +17,7 @@
   - [2.6 删除笔记](#26-删除笔记)
   - [2.7 移动与重命名](#27-移动与重命名)
   - [2.8 插入图片](#28-插入图片)
+  - [2.9 语音输入（Voice → Transcript Note）](#29-语音输入voice--transcript-note)
 - [3. 搜索](#3-搜索)
 - [4. Chat with Vault（RAG 问答）](#4-chat-with-vaultrag-问答)
 - [5. 建议中心（LLM 建议）](#5-建议中心llm-建议)
@@ -142,6 +143,34 @@ LMNotes 主窗口采用三栏布局：
 
 - 图片按 **SHA-256 哈希**存储到 `assets/img/<前2位hex>/<完整hash>.<扩展名>`，**自动去重**（相同图片不重复存）。
 - 在光标处插入 Markdown 图片链接 `![文件名](/<相对路径>)`。
+
+### 2.9 语音输入（Voice → Transcript Note）
+
+按 **`Ctrl+Shift+V`** 或点左侧栏「🎤 语音」打开语音录入浮窗（首次使用会请求麦克风权限）。
+
+**前置配置**（语音转录需上云，默认关闭）：
+
+1. 打开 **设置**（`Ctrl+,` 或点 ⚙）。
+2. 在某个 **OpenAI 兼容** provider 下填写 **Transcribe Model**（如 `whisper-1`；Groq 可填 `whisper-large-v3`）。
+3. 勾选 **允许云端 Provider（默认关闭，本地优先）**。
+4. 保存后**重启应用**生效。
+
+> ⚠️ 录音会发送到所配置的云端 Whisper 端点转录。默认本地优先：未配置云端 provider 或未勾选允许云端时，语音功能不可用。详见 [ADR-0005](adr/ADR-0005-llm-provider-guardrails.md) 护栏与 [ADR-0006](adr/ADR-0006-voice-transcription.md) 语音决策。
+
+**录入流程**：
+
+1. 点 **● 开始录音** → 浏览器采集麦克风（webm/opus，Safari 退化为 mp4）。
+2. 再点 **● 录音中…** 停止 → 音频上传到云端转录。
+3. 转录完成后自动生成一条笔记并在编辑器打开。
+
+**产物**（符合 [OKF §3.5](specs/PRD.md) 多模态资源规范）：
+
+- **音频本体**：SHA-256 去重存到 `assets/audio/<前2位hex>/<完整hash>.<扩展名>`。
+- **转录笔记**：写入 `transcripts/` 目录，`type: transcript`，frontmatter 含：
+  - `resource`（OKF 官方字段）：指向音频本体（如 `/assets/audio/9f/9f2c….webm`）。
+  - `duration_ms` / `mime` / `transcribed_by` / `language`：LMNotes 扩展字段。
+  - `id`：`at_voice_<4位>` 资源 ID。
+- 正文即转录文字。该笔记会自动进入增量索引，并被建议中心生成摘要/标签建议，可被搜索命中。
 
 ---
 
@@ -272,6 +301,7 @@ LMNotes 主窗口采用三栏布局：
 | 快捷键 | 功能 |
 |---|---|
 | `Ctrl/Cmd + N` | 打开快速捕获 |
+| `Ctrl/Cmd + Shift + V` | 语音输入（录音→转录笔记） |
 | `Ctrl/Cmd + ,` | 打开 Provider 设置 |
 | `Ctrl/Cmd + J` | 打开 Chat with Vault |
 | `Ctrl/Cmd + Z` | 编辑器撤销 |
