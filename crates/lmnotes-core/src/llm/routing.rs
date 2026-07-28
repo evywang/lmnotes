@@ -156,6 +156,27 @@ impl Registry {
         )))
     }
 
+    /// 取 transcribe 任务的全部候选 provider（首选 + 备选，仅返回已注册的）。
+    /// 供运行时降级用：调用方按序试，云端网络错误时切下一个（ADR-0007）。
+    /// 返回有序 Vec<(provider_arc, model)>，可能为空。
+    pub fn transcribe_candidates(
+        &self,
+        routing: &Routing,
+        task: Task,
+    ) -> Vec<(Arc<dyn TranscribeCap>, String)> {
+        let Some((primary, fallbacks)) = routing.map.get(&task) else {
+            return Vec::new();
+        };
+        std::iter::once(primary)
+            .chain(fallbacks.iter())
+            .filter_map(|pref| {
+                self.transcribes
+                    .get(&pref.provider_id)
+                    .map(|p| (p.clone(), pref.model.clone()))
+            })
+            .collect()
+    }
+
     pub fn get(&self, id: &str) -> Option<Arc<dyn LlmProvider>> {
         self.providers.get(id).cloned()
     }
@@ -309,5 +330,71 @@ mod tests {
         let reg = Registry::new();
         let r = routing(Task::Transcribe, "absent", &["also-absent"]);
         assert!(reg.transcribe_for(&r, Task::Transcribe).is_err());
+    }
+
+    // ── transcribe_candidates（运行时降级用，ADR-0007）──────────────────
+    #[test]
+    fn candidates_returns_ordered_primary_then_fallbacks() {
+        // 注册两个 provider；candidates 应按 primary → fallback 顺序返回已注册的。
+        let mut reg = Registry::new();
+        reg.register_transcribe(FakeTranscribe); // id "fake-tr"
+                                                 // 再注册一个 fake 作为 fallback
+        struct FakeTranscribe2;
+        #[async_trait]
+        impl LlmProvider for FakeTranscribe2 {
+            fn id(&self) -> &str {
+                "fake-tr-2"
+            }
+            fn kind(&self) -> ProviderKind {
+                ProviderKind::Local
+            }
+            fn capabilities(&self) -> Capabilities {
+                Capabilities::TRANSCRIBE
+            }
+            async fn health(&self) -> Result<bool> {
+                Ok(true)
+            }
+        }
+        #[async_trait]
+        impl TranscribeCap for FakeTranscribe2 {
+            async fn transcribe(
+                &self,
+                _: AudioInput,
+                _: &str,
+                _: Option<&str>,
+            ) -> Result<Transcript> {
+                Ok(Transcript { text: "ok".into() })
+            }
+        }
+        reg.register_transcribe(FakeTranscribe2);
+        // primary = fake-tr-2, fallback = [fake-tr] → candidates 顺序应与此一致
+        let r = routing(Task::Transcribe, "fake-tr-2", &["fake-tr"]);
+        let cands = reg.transcribe_candidates(&r, Task::Transcribe);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0].0.id(), "fake-tr-2");
+        assert_eq!(cands[1].0.id(), "fake-tr");
+    }
+
+    #[test]
+    fn candidates_skips_unregistered() {
+        // primary 未注册、fallback 一个注册一个未注册 → 只返回注册的那个
+        let mut reg = Registry::new();
+        reg.register_transcribe(FakeTranscribe);
+        let r = routing(
+            Task::Transcribe,
+            "absent-primary",
+            &["absent-fb", "fake-tr"],
+        );
+        let cands = reg.transcribe_candidates(&r, Task::Transcribe);
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].0.id(), "fake-tr");
+    }
+
+    #[test]
+    fn candidates_empty_when_no_routing() {
+        let reg = Registry::new();
+        let r = Routing::default(); // 无任何路由
+        let cands = reg.transcribe_candidates(&r, Task::Transcribe);
+        assert!(cands.is_empty());
     }
 }

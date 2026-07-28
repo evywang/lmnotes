@@ -6,6 +6,7 @@ pub mod openai; // T3
 pub mod provider;
 pub mod routing; // T4
 pub mod suggestion; // T6
+pub mod transcribe_fallback; // ADR-0007 运行时降级错误分类
 pub mod whisper; // T2 (语音转录 FR-CAP-05 / FR-MEDIA-01)
 
 pub use provider::*;

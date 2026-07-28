@@ -36,8 +36,23 @@ export const zh: Record<MessageKey, string> = {
   "voice.processing": "转录中…",
   "voice.permissionDenied": "已拒绝麦克风权限。",
   "voice.errorTranscribe": "转录失败：{msg}",
+  "voice.cloudDownNoLocal": "云端转录不可用且本地未就绪。下载下方模型以启用离线降级。",
 
-  // ── Chat drawer ───────────────────────────────────────────────────────
+  // ── 本地 STT（whisper.cpp 降级，ADR-0007）─────────────────────────────
+  "localStt.title": "🎙️ 本地 STT（离线降级）",
+  "localStt.description": "云端 Whisper 不可达时，转录会自动降级到本地 whisper.cpp。下载一个模型即可启用。",
+  "localStt.binaryOk": "whisper.cpp 引擎：就绪",
+  "localStt.binaryMissing": "whisper.cpp 引擎：未找到（随安装包分发）",
+  "localStt.ffmpegOk": "ffmpeg（音频转码）：就绪",
+  "localStt.ffmpegMissing": "ffmpeg（音频转码）：未找到",
+  "localStt.models": "模型",
+  "localStt.download": "下载",
+  "localStt.downloading": "下载中… {downloaded} / {total} MB",
+  "localStt.downloadingIndeterminate": "下载中… {downloaded} MB",
+  "localStt.downloadFailed": "下载失败：{msg}",
+  "localStt.noModelsDownloaded": "尚未下载任何模型。",
+
+  // ── Chat drawer ───────────────────────────────────────────────────────────────
   "chat.title": "💬 Chat with Vault",
   "chat.clearTooltip": "清空历史",
   "chat.clear": "清空",

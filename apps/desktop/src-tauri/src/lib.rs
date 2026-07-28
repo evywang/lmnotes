@@ -2,6 +2,7 @@
 
 mod commands;
 mod llm_config;
+pub mod whisper_cpp;
 
 use lmnotes_core::backend::fs::FsBackend;
 use lmnotes_core::index::sqlite::SqliteIndex;
@@ -227,6 +228,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_shell::init())
         .manage(indexer)
         .manage(engine)
         .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
@@ -266,7 +268,10 @@ pub fn run() {
             commands::reveal_in_explorer,
             commands::move_item,
             commands::graph_full,
-            commands::graph_neighborhood
+            commands::graph_neighborhood,
+            commands::list_whisper_models,
+            commands::download_whisper_model,
+            commands::get_local_stt_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

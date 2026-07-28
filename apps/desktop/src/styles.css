@@ -557,6 +557,36 @@ body {
   }
 }
 
+/* 本地 STT 设置面板（ADR-0007） */
+.local-stt-section {
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+  margin-top: 0.8rem;
+}
+.local-stt-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0.5rem 0;
+}
+.local-stt-models {
+  margin-top: 0.5rem;
+}
+.local-stt-model-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.local-stt-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1;
+}
+
 /* 建议中心 */
 .suggestion-list {
   display: flex;

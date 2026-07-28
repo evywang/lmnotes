@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "默认权限：核心能力 + 对话框",
+  "description": "默认权限：核心能力 + 对话框 + whisper/ffmpeg sidecar 执行",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:default"]
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "binaries/whisper", "sidecar": true },
+        { "name": "binaries/ffmpeg", "sidecar": true }
+      ]
+    }
+  ]
 }

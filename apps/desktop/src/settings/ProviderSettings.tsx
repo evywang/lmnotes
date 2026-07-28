@@ -1,6 +1,7 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t, locale, setLocale } from "../i18n";
+import { LocalSttSetup } from "../voice/LocalSttSetup";
 
 interface ProviderRefSer {
   provider: string;
@@ -214,6 +215,8 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   {t("settings.cloudAllowed")}
                 </label>
               </div>
+
+              <LocalSttSetup />
 
               <div class="settings-actions">
                 <button class="btn-primary" onClick={save} disabled={saving()}>

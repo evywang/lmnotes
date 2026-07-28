@@ -42,6 +42,18 @@ fn vault_root() -> PathBuf {
     home.join(".lmnotes").join("default")
 }
 
+/// LMNotes 配置主目录 ~/.lmnotes（与 config.json / mcp.json 同级）。
+/// whisper.cpp 模型存放于此下的 models/（ADR-0007）。
+fn lmnotes_home() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".lmnotes")
+}
+
+/// whisper.cpp 模型存放目录 ~/.lmnotes/models/。
+pub fn models_dir() -> PathBuf {
+    lmnotes_home().join("models")
+}
+
 #[derive(serde::Serialize)]
 pub struct ConceptDto {
     pub text: String,
@@ -317,6 +329,30 @@ pub async fn probe_providers(
                     healthy: ok,
                 });
             }
+            crate::llm_config::ProviderConfig::WhisperCpp {
+                model,
+                binary_path,
+                ffmpeg_path,
+                threads,
+            } => {
+                // 探测本地 whisper.cpp：binary + 模型文件都存在才健康。
+                let model_name = model.as_deref().unwrap_or("base");
+                let binary = binary_path
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .or_else(whisper_binary_path);
+                let model_p = models_dir().join(format!("ggml-{model_name}.bin"));
+                let _ = ffmpeg_path; // ffmpeg 探测单独显示在 LocalSttStatus
+                let _ = threads;
+                let ok = binary
+                    .as_ref()
+                    .map(|b| b.exists() && model_p.exists())
+                    .unwrap_or(false);
+                results.push(ProviderHealth {
+                    provider_id: "whisper-cpp".into(),
+                    healthy: ok,
+                });
+            }
         }
     }
     Ok(results)
@@ -512,7 +548,36 @@ pub async fn create_note(title: String, parent_dir: Option<String>) -> Result<St
     Ok(path)
 }
 
-/// 语音转录笔记（FR-CAP-05 + FR-MEDIA-01）：
+/// 运行时转录降级（ADR-0007）：薄封装核心层 `try_transcribe_with_fallback`。
+///
+/// 核心降级逻辑（候选顺序、护栏、网络错误识别、降级判定）在
+/// `lmnotes_core::llm::transcribe_fallback`，有完整单测覆盖。
+/// 壳层仅负责 String 错误转换（Tauri 命令返回 `Result<_, String>`）与降级日志。
+async fn transcribe_with_fallback(
+    registry: &Registry,
+    routing: &Routing,
+    guard_cfg: &GuardConfig,
+    audio: lmnotes_core::llm::provider::AudioInput,
+    language: Option<&str>,
+) -> Result<(lmnotes_core::llm::provider::Transcript, String), String> {
+    eprintln!(
+        "transcribe: candidates = {:?}",
+        registry
+            .transcribe_candidates(routing, Task::Transcribe)
+            .iter()
+            .map(|(p, _)| p.id())
+            .collect::<Vec<_>>()
+    );
+    lmnotes_core::llm::transcribe_fallback::try_transcribe_with_fallback(
+        registry, routing, guard_cfg, audio, language,
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("transcribe failed: {e}");
+        e.to_string()
+    })
+}
+
 /// 1) 音频 SHA-256 去重归档到 assets/audio/
 /// 2) 经路由取 transcribe provider（云端 Whisper 兼容）
 /// 3) 过三层护栏（音频不可字符串扫描，仅 cloud_allowed + local_only 闸）
@@ -545,34 +610,23 @@ pub async fn create_voice_note(
     let (asset_rel, hash) = archive_binary(&audio, &ext, "audio").await?;
     let now = Utc::now();
 
-    // 2) 取 transcribe provider（首选→降级）
-    let (transcriber, model) = registry
-        .transcribe_for(&routing, Task::Transcribe)
-        .map_err(|e| e.to_string())?;
-    let provider_id = transcriber.id().to_string();
-
-    // 3) 护栏：音频不可字符串扫描，传空串；依赖 cloud_allowed + local_only 两道闸。
-    //    此路径无源 concept，local_only 恒 false。云端默认被 cloud_allowed=false 拒。
-    match check(&guard_cfg, transcriber.kind(), "", false) {
-        GuardDecision::Allow => {}
-        GuardDecision::Deny(reason) => return Err(reason),
-    }
-
-    // 4) 转录（mime 克隆一份，转录消费一份，frontmatter 存一份）
+    // 2-4) 转录（含云端失败→本地 whisper.cpp 自动降级，ADR-0007）。
+    // 返回 (Transcript, provider_id)——provider_id 写进 frontmatter 的 transcribed_by，
+    // 用户可看出本次是云端还是本地转录的。
     let filename = format!("{hash}.{ext}");
     let mime_for_meta = mime.clone();
-    let tr = transcriber
-        .transcribe(
-            AudioInput {
-                bytes: audio,
-                mime,
-                filename,
-            },
-            &model,
-            language.as_deref(),
-        )
-        .await
-        .map_err(|e| e.to_string())?;
+    let (tr, provider_id) = transcribe_with_fallback(
+        &registry,
+        &routing,
+        &guard_cfg,
+        AudioInput {
+            bytes: audio,
+            mime,
+            filename,
+        },
+        language.as_deref(),
+    )
+    .await?;
 
     // 5) 构建 transcript concept（PRD §3.5 完整形态）
     let ts_display = now.format("%Y-%m-%d %H:%M").to_string();
@@ -585,7 +639,7 @@ pub async fn create_voice_note(
     extra.insert("mime".into(), serde_yaml::Value::String(mime_for_meta));
     extra.insert(
         "transcribed_by".into(),
-        serde_yaml::Value::String(format!("{model}@{provider_id}")),
+        serde_yaml::Value::String(provider_id.clone()),
     );
     let fm = Frontmatter {
         type_: "transcript".into(),
@@ -1200,4 +1254,209 @@ pub fn graph_neighborhood(
     };
     let data = graph::build_neighborhood(idx, idx, &id, k, threshold).map_err(|e| e.to_string())?;
     Ok(GraphDto::from(data))
+}
+
+// ============ 本地 STT（whisper.cpp）模型管理（FR-MEDIA-05 / ADR-0007）============
+
+/// 可下载的 whisper.cpp 模型元数据（来源：HuggingFace ggml-org/whisper.cpp）。
+#[derive(serde::Serialize, Clone)]
+pub struct WhisperModel {
+    /// 模型短名（ggml-<name>.bin 的 <name>），如 "base"。
+    pub name: String,
+    /// 展示名（含参数量）。
+    pub label: String,
+    /// 大致体积（MB）。
+    pub size_mb: u64,
+    /// 中英文质量推荐语。
+    pub note: String,
+    /// HF 下载直链。
+    pub url: String,
+}
+
+/// 本地 STT 当前就绪状态。
+#[derive(serde::Serialize)]
+pub struct LocalSttStatus {
+    /// whisper.cpp binary 是否就绪（sidecar 已打包/路径有效）。
+    pub binary_available: bool,
+    /// ffmpeg binary 是否就绪（转码用）。
+    pub ffmpeg_available: bool,
+    /// 已下载的模型名列表（ggml-<name>.bin 的 <name>）。
+    pub models: Vec<String>,
+}
+
+/// 内置模型清单（MVP 只列 base/small/medium；large 留后续）。
+fn builtin_whisper_models() -> Vec<WhisperModel> {
+    let base = "https://huggingface.co/ggml-org/whisper.cpp/resolve/main";
+    vec![
+        WhisperModel {
+            name: "base".into(),
+            label: "Base (74M)".into(),
+            size_mb: 142,
+            note: "体积最小，速度最快；英文尚可，中文一般。推荐首试。".into(),
+            url: format!("{base}/ggml-base.bin"),
+        },
+        WhisperModel {
+            name: "small".into(),
+            label: "Small (244M)".into(),
+            size_mb: 466,
+            note: "中英文质量与速度平衡；日常速记推荐。".into(),
+            url: format!("{base}/ggml-small.bin"),
+        },
+        WhisperModel {
+            name: "medium".into(),
+            label: "Medium (769M)".into(),
+            size_mb: 1480,
+            note: "中文质量好但慢、占空间；长录音场景用。".into(),
+            url: format!("{base}/ggml-medium.bin"),
+        },
+    ]
+}
+
+/// 列出可选 whisper.cpp 模型 + 标记已下载。
+#[tauri::command]
+pub fn list_whisper_models() -> Vec<WhisperModel> {
+    let downloaded: std::collections::HashSet<String> = list_downloaded_model_names();
+    let mut all = builtin_whisper_models();
+    // 把"已下载"信息塞进 note 前缀（前端可据此显示勾选）。
+    // 更结构化的做法是加 downloaded 字段，但保持向后兼容暂复用 note。
+    for m in &mut all {
+        if downloaded.contains(&m.name) {
+            m.note = format!("✓ 已下载 · {}", m.note);
+        }
+    }
+    all
+}
+
+/// 扫描 models/ 目录，返回已下载的模型名（去 ggml- 前缀与 .bin 后缀）。
+fn list_downloaded_model_names() -> std::collections::HashSet<String> {
+    let mut set = std::collections::HashSet::new();
+    let dir = models_dir();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            if let Some(name) = e.file_name().to_str() {
+                if let Some(stripped) = name
+                    .strip_prefix("ggml-")
+                    .and_then(|s| s.strip_suffix(".bin"))
+                {
+                    set.insert(stripped.to_string());
+                }
+            }
+        }
+    }
+    set
+}
+
+/// 探测本地 STT 就绪状态（前端开语音浮窗前调用，决定是否需下载模型）。
+#[tauri::command]
+pub fn get_local_stt_status() -> LocalSttStatus {
+    LocalSttStatus {
+        binary_available: whisper_binary_path().is_some(),
+        ffmpeg_available: ffmpeg_binary_path().is_some(),
+        models: list_downloaded_model_names().into_iter().collect(),
+    }
+}
+
+/// 推测 whisper.cpp sidecar 路径。
+/// 开发模式（无 sidecar 打包）：探测 ~/.lmnotes/bin/whisper[.exe]（用户手动放）或 PATH。
+/// 发布模式：sidecar 解压到应用资源目录（此处用 env LMNOTES_SIDECAR_DIR 覆盖，或退化为 None）。
+pub fn whisper_binary_path() -> Option<PathBuf> {
+    resolve_sidecar("whisper")
+}
+
+pub fn ffmpeg_binary_path() -> Option<PathBuf> {
+    resolve_sidecar("ffmpeg")
+}
+
+/// 解析 sidecar：依次查 env 覆盖、~/.lmnotes/bin/、PATH（which）。
+fn resolve_sidecar(name: &str) -> Option<PathBuf> {
+    let exe_ext = if cfg!(windows) { ".exe" } else { "" };
+    // 1) 环境变量显式覆盖（高级用户/CI）
+    if let Ok(p) = std::env::var(format!("LMNOTES_{}_PATH", name.to_uppercase())) {
+        let pb = PathBuf::from(p);
+        if pb.exists() {
+            return Some(pb);
+        }
+    }
+    // 2) ~/.lmnotes/bin/<name>[.exe]
+    let local = lmnotes_home().join("bin").join(format!("{name}{exe_ext}"));
+    if local.exists() {
+        return Some(local);
+    }
+    // 3) PATH（仅 Unix which；Windows 省略，依赖 Tauri sidecar 机制在发布时解析）
+    #[cfg(unix)]
+    {
+        if let Ok(out) = std::process::Command::new("which").arg(name).output() {
+            if out.status.success() {
+                let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !p.is_empty() {
+                    return Some(PathBuf::from(p));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 下载 whisper.cpp 模型到 ~/.lmnotes/models/。
+/// 流式下载，定期 emit 进度事件 `whisper-model-progress`。
+/// 返回本地模型文件路径。
+#[tauri::command]
+pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Result<String, String> {
+    let model = builtin_whisper_models()
+        .into_iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| format!("unknown model: {name}"))?;
+    let dir = models_dir();
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    let dest = dir.join(format!("ggml-{}.bin", name));
+    let tmp = dir.join(format!("ggml-{name}.bin.part"));
+
+    // 流式下载 + 进度
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&model.url)
+        .send()
+        .await
+        .map_err(|e| format!("download request: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("download HTTP {}", resp.status()));
+    }
+    let total = resp.content_length();
+    use futures_util::StreamExt;
+    let mut stream = resp.bytes_stream();
+    let mut file = tokio::fs::File::create(&tmp)
+        .await
+        .map_err(|e| e.to_string())?;
+    use tokio::io::AsyncWriteExt;
+    let mut downloaded: u64 = 0;
+    let mut last_emit = std::time::Instant::now();
+    while let Some(chunk) = stream.next().await {
+        let bytes = chunk.map_err(|e| format!("download stream: {e}"))?;
+        file.write_all(&bytes).await.map_err(|e| e.to_string())?;
+        downloaded += bytes.len() as u64;
+        // 节流：每 250ms emit 一次，避免事件风暴。
+        if last_emit.elapsed() > std::time::Duration::from_millis(250) {
+            let _ = app.emit(
+                "whisper-model-progress",
+                serde_json::json!({
+                    "name": name,
+                    "downloaded": downloaded,
+                    "total": total,
+                }),
+            );
+            last_emit = std::time::Instant::now();
+        }
+    }
+    file.flush().await.map_err(|e| e.to_string())?;
+    drop(file);
+    tokio::fs::rename(&tmp, &dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit(
+        "whisper-model-progress",
+        serde_json::json!({ "name": name, "done": true }),
+    );
+    Ok(dest.to_string_lossy().into_owned())
 }

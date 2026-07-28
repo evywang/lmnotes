@@ -6,3 +6,11 @@
 
 # Windows reserved filename accidentally created by a redirect
 /nul
+
+# Tauri sidecar 二进制（whisper.cpp / ffmpeg）—— CI 下载，不入仓库（ADR-0007）
+apps/desktop/src-tauri/binaries/
+
+# whisper.cpp 模型权重（.bin/.gguf）—— 首次按需下载到 ~/.lmnotes/models/，不入仓库
+ggml-*.bin
+*.gguf
+

@@ -97,10 +97,12 @@ impl TranscribeCap for WhisperProvider {
         let status = resp.status();
         let body = resp.text().await?;
         if !status.is_success() {
-            return Err(crate::CoreError::Conformance(format!(
-                "whisper transcribe HTTP {status}: {}",
-                body.chars().take(500).collect::<String>()
-            )));
+            // 用 TranscribeHttp 携带状态码，供 classify_transcribe_error 判断
+            // 5xx 降级 / 4xx 不降级（ADR-0007）。原 Conformance 会丢失 status。
+            return Err(crate::CoreError::TranscribeHttp {
+                status: status.as_u16(),
+                body: body.chars().take(500).collect(),
+            });
         }
 
         // response_format=text → 裸文本；但兼容端点可能返回 JSON，尝试两种解析。
@@ -194,6 +196,13 @@ mod tests {
             )
             .await;
         assert!(res.is_err());
+        // 关键：非 2xx 应包成 TranscribeHttp（带 status），而非 Conformance——
+        // 否则 classify_transcribe_error 无法识别 5xx 触发降级（ADR-0007）。
+        let err = res.unwrap_err();
+        match err {
+            crate::CoreError::TranscribeHttp { status, .. } => assert_eq!(status, 401),
+            other => panic!("expected TranscribeHttp, got {other:?}"),
+        }
     }
 
     #[test]

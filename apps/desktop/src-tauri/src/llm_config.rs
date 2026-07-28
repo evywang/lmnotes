@@ -77,6 +77,27 @@ pub enum ProviderConfig {
         #[serde(default)]
         transcribe_model: Option<String>,
     },
+    /// 本地 whisper.cpp（ADR-0007）。云端不可用时的降级 provider。
+    /// id 固定 "whisper-cpp"。binary/ffmpeg 路径缺省走 sidecar 解析（commands::resolve_sidecar）。
+    #[serde(rename = "whisper_cpp")]
+    WhisperCpp {
+        /// 模型短名（ggml-<name>.bin 的 <name>，如 "base"/"small"）。None 用 "base"。
+        #[serde(default)]
+        model: Option<String>,
+        /// 覆盖 whisper.cpp 二进制路径（高级用户；默认自动探测 sidecar）。
+        #[serde(default)]
+        binary_path: Option<String>,
+        /// 覆盖 ffmpeg 二进制路径（默认自动探测；None 则跳过转码）。
+        #[serde(default)]
+        ffmpeg_path: Option<String>,
+        /// CPU 线程数（默认 4）。
+        #[serde(default = "default_whisper_threads")]
+        threads: usize,
+    },
+}
+
+fn default_whisper_threads() -> usize {
+    4
 }
 
 fn default_ollama_dim() -> usize {
@@ -92,6 +113,8 @@ impl ProviderConfig {
         match self {
             ProviderConfig::Ollama { embed_dim, .. } => *embed_dim,
             ProviderConfig::OpenAi { embed_dim, .. } => *embed_dim,
+            // whisper.cpp 不做 embedding，不参与 dim 协商
+            ProviderConfig::WhisperCpp { .. } => 0,
         }
     }
 }
@@ -193,6 +216,7 @@ impl Config {
                 let pid = match p {
                     ProviderConfig::Ollama { .. } => "ollama",
                     ProviderConfig::OpenAi { id, .. } => id.as_str(),
+                    ProviderConfig::WhisperCpp { .. } => "whisper-cpp",
                 };
                 if pid == embed_ref.provider {
                     return p.embed_dim();
@@ -209,6 +233,7 @@ impl Config {
         use lmnotes_core::llm::openai::OpenAiProvider;
         use lmnotes_core::llm::whisper::WhisperProvider;
         let mut reg = lmnotes_core::llm::routing::Registry::new();
+        let mut user_configured_whisper_cpp = false;
         for p in &self.providers {
             match p {
                 ProviderConfig::Ollama { base_url, .. } => {
@@ -227,6 +252,22 @@ impl Config {
                     reg.register_chat_arc(openai.clone());
                     reg.register_embed_arc(openai);
                 }
+                ProviderConfig::WhisperCpp {
+                    model,
+                    binary_path,
+                    ffmpeg_path,
+                    threads,
+                } => {
+                    if register_whisper_cpp(
+                        &mut reg,
+                        model.as_deref(),
+                        binary_path.as_deref(),
+                        ffmpeg_path.as_deref(),
+                        *threads,
+                    ) {
+                        user_configured_whisper_cpp = true;
+                    }
+                }
             }
             // 转录能力：仅 OpenAI 兼容 provider 配了 transcribe_model 时注册
             //（独立 WhisperProvider 实例，与 chat/embed 同 id 但不同能力 map）。
@@ -242,7 +283,22 @@ impl Config {
                 reg.register_transcribe(whisper);
             }
         }
-        let routing = self.build_routing();
+        // 自动注册 whisper.cpp 作为本地降级 provider（ADR-0007 §决策"开箱可用"）：
+        // 即使用户 config.json 未声明 WhisperCpp，只要 sidecar 可探测到就注册，
+        // 使其天然成为云端 transcribe 的 fallback。
+        let auto_whisper_cpp = if !user_configured_whisper_cpp {
+            register_whisper_cpp(
+                &mut reg,
+                Some("base"),
+                None,
+                None,
+                default_whisper_threads(),
+            )
+        } else {
+            false
+        };
+        let whisper_cpp_registered = user_configured_whisper_cpp || auto_whisper_cpp;
+        let routing = self.build_routing(whisper_cpp_registered);
         let guard = GuardConfig {
             cloud_allowed: self.guard.cloud_allowed,
             sensitive_patterns: self.guard.sensitive_patterns.clone(),
@@ -250,7 +306,7 @@ impl Config {
         (reg, routing, guard)
     }
 
-    fn build_routing(&self) -> Routing {
+    fn build_routing(&self, whisper_cpp_registered: bool) -> Routing {
         let mut map = std::collections::HashMap::new();
         let to_ref = |r: &ProviderRefSer| {
             (
@@ -276,8 +332,27 @@ impl Config {
         if let Some(r) = &self.routing.rewrite {
             map.insert(Task::Rewrite, to_ref(r));
         }
+        // Transcribe 路由：primary + whisper-cpp 作为本地降级 fallback（ADR-0007）。
+        // primary 来自显式 routing.transcribe、或自动派生的云端 provider、或仅本地。
+        let local_fb = if whisper_cpp_registered {
+            vec![ProviderRef {
+                provider_id: "whisper-cpp".into(),
+                model: "base".into(),
+            }]
+        } else {
+            vec![]
+        };
         if let Some(r) = &self.routing.transcribe {
-            map.insert(Task::Transcribe, to_ref(r));
+            map.insert(
+                Task::Transcribe,
+                (
+                    ProviderRef {
+                        provider_id: r.provider.clone(),
+                        model: r.model.clone(),
+                    },
+                    local_fb.clone(),
+                ),
+            );
         } else if let Some((pid, model)) = self.derive_transcribe_ref() {
             // 用户在 provider 上填了 transcribe_model 但未显式配 routing.transcribe：
             // 自动派生，避免"配了模型却路由不到"的常见陷阱。
@@ -287,6 +362,18 @@ impl Config {
                     ProviderRef {
                         provider_id: pid,
                         model,
+                    },
+                    local_fb.clone(),
+                ),
+            );
+        } else if whisper_cpp_registered {
+            // 无云端 provider：本地 whisper.cpp 当 primary（仅本地模式）。
+            map.insert(
+                Task::Transcribe,
+                (
+                    ProviderRef {
+                        provider_id: "whisper-cpp".into(),
+                        model: "base".into(),
                     },
                     vec![],
                 ),
@@ -310,6 +397,39 @@ impl Config {
         }
         None
     }
+}
+
+/// 注册 whisper.cpp 本地 provider 到 Registry。返回是否成功注册（sidecar+模型可达）。
+/// 失败（binary/模型不可达）静默跳过——本地 STT 在运行时降级时由前端引导下载。
+/// 路径优先级：用户显式 binary_path > commands::resolve_sidecar > 放弃。
+fn register_whisper_cpp(
+    reg: &mut lmnotes_core::llm::routing::Registry,
+    model: Option<&str>,
+    binary_path: Option<&str>,
+    ffmpeg_path: Option<&str>,
+    threads: usize,
+) -> bool {
+    use crate::commands::{ffmpeg_binary_path, models_dir, whisper_binary_path};
+    use crate::whisper_cpp::WhisperCppProvider;
+    let model_name = model.unwrap_or("base");
+    // binary：显式 > 自动探测
+    let binary = if let Some(p) = binary_path {
+        Some(std::path::PathBuf::from(p))
+    } else {
+        whisper_binary_path()
+    };
+    let Some(binary) = binary else {
+        return false; // sidecar 不可达
+    };
+    // ffmpeg：显式 > 自动探测（None 允许——仅 WAV 直通场景）
+    let ffmpeg = ffmpeg_path
+        .map(std::path::PathBuf::from)
+        .or_else(ffmpeg_binary_path);
+    // 模型：~/.lmnotes/models/ggml-<name>.bin
+    let model_p = models_dir().join(format!("ggml-{model_name}.bin"));
+    let provider = WhisperCppProvider::new("whisper-cpp", binary, ffmpeg, model_p, threads);
+    reg.register_transcribe(provider);
+    true
 }
 
 #[cfg(test)]
@@ -382,5 +502,57 @@ mod tests {
             "no transcribe routing expected"
         );
         assert!(reg.transcribe_for(&routing, Task::Transcribe).is_err());
+    }
+
+    // ── WhisperCpp 配置变体（ADR-0007）──────────────────────────────────
+
+    #[test]
+    fn whisper_cpp_config_round_trips_through_json() {
+        // 用户在 config.json 写 whisper_cpp provider，应正确反序列化 + 回写。
+        let json = r#"{
+            "providers": [
+                {"type":"whisper_cpp","model":"small","threads":8}
+            ],
+            "routing": {},
+            "guard": {"cloud_allowed": false, "sensitive_patterns": []}
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.providers.len(), 1);
+        match &cfg.providers[0] {
+            ProviderConfig::WhisperCpp {
+                model,
+                threads,
+                binary_path,
+                ffmpeg_path,
+            } => {
+                assert_eq!(model.as_deref(), Some("small"));
+                assert_eq!(*threads, 8);
+                assert!(binary_path.is_none());
+                assert!(ffmpeg_path.is_none());
+            }
+            other => panic!("expected WhisperCpp, got {other:?}"),
+        }
+        // 回写 JSON 应能再次解析（round-trip）
+        let reserialized = serde_json::to_string(&cfg).unwrap();
+        let cfg2: Config = serde_json::from_str(&reserialized).unwrap();
+        assert_eq!(cfg.providers.len(), cfg2.providers.len());
+    }
+
+    #[test]
+    fn whisper_cpp_defaults_threads_and_model_when_omitted() {
+        // 缺省 model=None（→ base）、threads=4（default_whisper_threads）。
+        let json = r#"{
+            "providers": [{"type":"whisper_cpp"}],
+            "routing": {},
+            "guard": {"cloud_allowed": false, "sensitive_patterns": []}
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        match &cfg.providers[0] {
+            ProviderConfig::WhisperCpp { model, threads, .. } => {
+                assert!(model.is_none(), "model should default to None (→ base)");
+                assert_eq!(*threads, 4, "threads should default to 4");
+            }
+            other => panic!("expected WhisperCpp, got {other:?}"),
+        }
     }
 }

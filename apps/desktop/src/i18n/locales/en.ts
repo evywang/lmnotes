@@ -35,8 +35,23 @@ export const en = {
   "voice.processing": "Transcribing…",
   "voice.permissionDenied": "Microphone permission denied.",
   "voice.errorTranscribe": "Transcription failed: {msg}",
+  "voice.cloudDownNoLocal": "Cloud transcribe unavailable and no local STT ready. Download a model below to enable offline fallback.",
 
-  // ── Chat drawer ───────────────────────────────────────────────────────
+  // ── Local STT (whisper.cpp fallback, ADR-0007) ────────────────────────
+  "localStt.title": "🎙️ Local STT (offline fallback)",
+  "localStt.description": "When the cloud Whisper endpoint is unreachable, transcription automatically falls back to a local whisper.cpp engine. Download a model to enable it.",
+  "localStt.binaryOk": "whisper.cpp engine: ready",
+  "localStt.binaryMissing": "whisper.cpp engine: not found (bundled in the installer)",
+  "localStt.ffmpegOk": "ffmpeg (audio transcoding): ready",
+  "localStt.ffmpegMissing": "ffmpeg (audio transcoding): not found",
+  "localStt.models": "Models",
+  "localStt.download": "Download",
+  "localStt.downloading": "Downloading… {downloaded} / {total} MB",
+  "localStt.downloadingIndeterminate": "Downloading… {downloaded} MB",
+  "localStt.downloadFailed": "Download failed: {msg}",
+  "localStt.noModelsDownloaded": "No models downloaded yet.",
+
+  // ── Chat drawer ───────────────────────────────────────────────────────────────
   "chat.title": "💬 Chat with Vault",
   "chat.clearTooltip": "Clear history",
   "chat.clear": "Clear",
