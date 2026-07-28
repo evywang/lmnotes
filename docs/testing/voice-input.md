@@ -283,6 +283,90 @@ cargo test -p lmnotes-desktop --lib -- build_auto_derives build_without explicit
 
 ---
 
+#### TC-M10 断网 → 自动降级本地 whisper.cpp
+
+**前置**：已下载一个本地模型（设置 → 本地 STT → 下载 base）；云端 provider 配好且 `cloud_allowed=true`。
+
+**步骤**：
+1. 断开网络（关 WiFi / 拔网线）。
+2. `Ctrl+Shift+V` → 录一句 → 停止。
+
+**预期**：
+- 短暂等待后（云端连接失败快速返回）本地 whisper.cpp 接手转录。
+- 生成 transcript 笔记，frontmatter `transcribed_by: whisper-cpp`。
+- stderr 应有 "cloud transcribe failed (...), falling back" 日志。
+
+---
+
+#### TC-M11 云端 401（鉴权失败）→ 不降级，报错
+
+**前置**：本地模型已下载；云端 provider 的 API Key 故意填错（无效 key）。
+
+**步骤**：
+1. `Ctrl+Shift+V` → 录音 → 停止。
+
+**预期**：
+- 错误透传前端（如 "401 Unauthorized"），**不**降级到本地（401 属 4xx 用户配置问题，非网络不可用）。
+- 这是设计取舍：让用户看到鉴权问题，而非静默用本地掩盖。
+
+> 若希望 401 也降级，调整 `is_network_error` 放宽 4xx（不推荐，会掩盖配置错误）。
+
+---
+
+#### TC-M12 云端不可达 + 本地模型未下载 → 引导下载
+
+**前置**：断网；本地无任何模型（`~/.lmnotes/models/` 空）。
+
+**步骤**：
+1. `Ctrl+Shift+V` → 录音 → 停止。
+
+**预期**：
+- 错误信息提示"云端不可用且本地未就绪，请到设置下载模型"（`voice.cloudDownNoLocal`）。
+- 用户到 **设置 → 本地 STT** 下载模型后重试即成功。
+
+---
+
+#### TC-M13 模型下载中断恢复
+
+**步骤**：
+1. 设置 → 本地 STT → 点下载 small（~466MB）。
+2. 下载到一半断网/关应用。
+3. 重新打开，再次点下载。
+
+**预期**：
+- 进度条从 0 重新计（当前实现未做断点续传的续传，而是 `.part` 临时文件被覆盖重下）。
+- 完整下载完成后 `.part` 重命名为 `ggml-small.bin`，状态刷新为已下载。
+
+> 已知限制：当前 `download_whisper_model` 未实现 HTTP Range 断点续传，中断需重头下。后续可加。
+
+---
+
+#### TC-M14 本地 binary 缺失 → 不降级，明确报错
+
+**前置**：开发模式（未打包 sidecar），且 `~/.lmnotes/bin/whisper` 不存在、PATH 无 whisper。
+
+**步骤**：
+1. 设置 → 本地 STT：应显示 "whisper.cpp 引擎：未找到"。
+2. 断网 + 录音。
+
+**预期**：
+- 录音报错，提示引擎缺失（不静默失败）。
+- 发布版（安装包含 sidecar）此场景不出现。
+
+---
+
+#### TC-M15 长音频本地转录超时保护
+
+**步骤**：
+1. 仅本地模式（不配云端）+ 本地模型就绪。
+2. 录一段 >60s 的音频 → 停止。
+
+**预期**：
+- whisper.cpp 子进程在 60s 超时后被 kill，错误透传（"whisper.cpp timed out (60s)"）。
+- 不卡死应用。长音频留 FR-CAP-09 后台队列（P2）。
+
+---
+
 ### 3.4 验证产物 OKF 合规性
 
 对 TC-M01 生成的 transcript 笔记，用 CLI Validator 校验：

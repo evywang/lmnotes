@@ -40,6 +40,7 @@
 | [0004](ADR-0004-frontend-stack.md) | 前端框架/编辑器/图谱库选型 | Accepted (rev1: F6 Tiptap+Solid风险; rev2: M1a改用CodeMirror 6) | 2026-06-21 |
 | [0005](ADR-0005-llm-provider-guardrails.md) | LLM Provider 抽象与隐私护栏 | Accepted (rev1: F7 能力门控trait) | 2026-06-21 |
 | [0006](ADR-0006-voice-transcription.md) | 语音转录（云端 Whisper 优先） | Accepted | 2026-07-12 |
+| [0007](ADR-0007-local-stt-fallback.md) | 本地 STT 降级（whisper.cpp sidecar） | Accepted | 2026-07-21 |
 
 ## 与 PRD 的关系
 - PRD `docs/specs/PRD.md` §15 决策（O1–O6）是这些 ADR 的输入。

@@ -103,9 +103,13 @@ editing it.
   (check stderr for the "No healthy LLM provider" warning when debugging).
 - Indexes are derived/rebuildable — deleting `.lmnotes/` reindexes cleanly.
 
-## Feature backlog pointer (already specced, not yet built)
+## Voice / STT (built)
 
-Voice input / speech-to-text is **FR-CAP-05** (按住说话 / 流式转录, local Whisper
-or cloud) and **FR-MEDIA-01** (audio auto-transcription → `type: transcript`
-concept). Implementation should add a pluggable engine (whisper.cpp local /
-cloud API per FR-MEDIA-05) and route through the LLM provider guardrails (ADR-0005).
+Voice input / speech-to-text is **FR-CAP-05** + **FR-MEDIA-01** + **FR-MEDIA-05** — now implemented:
+- Cloud Whisper (OpenAI-compatible) is the primary path (ADR-0006).
+- Local whisper.cpp sidecar is the automatic runtime fallback when cloud is
+  unreachable (ADR-0007). `WhisperCppProvider` lives in the Tauri shell
+  (`apps/desktop/src-tauri/src/whisper_cpp.rs`), not `lmnotes-core` (it spawns
+  subprocesses + writes temp WAVs → ADR-0002 boundary). Models download on-demand
+  to `~/.lmnotes/models/`. Runtime fallback logic: `transcribe_with_fallback` in
+  `commands.rs` + `Registry::transcribe_candidates` in `routing.rs`.

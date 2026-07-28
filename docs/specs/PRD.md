@@ -280,7 +280,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-MEDIA-02 | 图片 OCR + 视觉描述（多模态 LLM 或专用模型） | P1 |
 | FR-MEDIA-03 | 视频抽关键帧 + 转录音轨；关键帧索引化 | P2 |
 | FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑 | MVP |
-| FR-MEDIA-05 | 处理引擎可插拔（本地 whisper.cpp / 云端 API） | P1 |
+| FR-MEDIA-05 | 处理引擎可插拔（本地 whisper.cpp / 云端 API）（✅ 已实现：云端 Whisper + 本地 whisper.cpp sidecar，运行时自动降级，见 [ADR-0007](../adr/ADR-0007-local-stt-fallback.md)） | P1 |
 
 ### 5.4 LLM 智能（域：LLM）—— 核心差异化
 | ID | 需求 | 优先级 |

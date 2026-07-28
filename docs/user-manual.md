@@ -148,19 +148,31 @@ LMNotes 主窗口采用三栏布局：
 
 按 **`Ctrl+Shift+V`** 或点左侧栏「🎤 语音」打开语音录入浮窗（首次使用会请求麦克风权限）。
 
-**前置配置**（语音转录需上云，默认关闭）：
+**两种转录引擎，云端优先、本地兜底**（[ADR-0007](adr/ADR-0007-local-stt-fallback.md)）：
+
+- **云端 Whisper**（默认主路径）：需配置 OpenAI 兼容 provider + Transcribe Model + 勾选允许云端（见下）。
+- **本地 whisper.cpp**（自动降级）：随安装包分发，无需自装。云端不可达（断网、端点宕、超时）时**自动切换**到本地重试，用户无感。首次离线使用前需下载一个模型（见下）。
+
+**前置配置（云端，可选）**：
 
 1. 打开 **设置**（`Ctrl+,` 或点 ⚙）。
 2. 在某个 **OpenAI 兼容** provider 下填写 **Transcribe Model**（如 `whisper-1`；Groq 可填 `whisper-large-v3`）。
 3. 勾选 **允许云端 Provider（默认关闭，本地优先）**。
 4. 保存后**重启应用**生效。
 
-> ⚠️ 录音会发送到所配置的云端 Whisper 端点转录。默认本地优先：未配置云端 provider 或未勾选允许云端时，语音功能不可用。详见 [ADR-0005](adr/ADR-0005-llm-provider-guardrails.md) 护栏与 [ADR-0006](adr/ADR-0006-voice-transcription.md) 语音决策。
+> 不配云端也能用：本地 whisper.cpp 开箱即作为兜底（仅需下载模型）。配了云端则云端优先、本地兜底。
+
+**下载本地模型（首次离线用）**：
+
+1. 打开 **设置** → 滚到「🎙️ 本地 STT（离线降级）」小节。
+2. 显示 whisper.cpp / ffmpeg 引擎状态（随安装包就绪）。
+3. 选模型点下载：**Base**（~140MB，英文尚可/中文一般，首试推荐）/ **Small**（~466MB，中英平衡，日常推荐）/ **Medium**（~1.5GB，中文好但慢）。
+4. 下载到 `~/.lmnotes/models/ggml-<name>.bin`，进度条可见。
 
 **录入流程**：
 
 1. 点 **● 开始录音** → 浏览器采集麦克风（webm/opus，Safari 退化为 mp4）。
-2. 再点 **● 录音中…** 停止 → 音频上传到云端转录。
+2. 再点 **● 录音中…** 停止 → 自动转录（云端优先，失败降本地）。
 3. 转录完成后自动生成一条笔记并在编辑器打开。
 
 **产物**（符合 [OKF §3.5](specs/PRD.md) 多模态资源规范）：
@@ -168,9 +180,11 @@ LMNotes 主窗口采用三栏布局：
 - **音频本体**：SHA-256 去重存到 `assets/audio/<前2位hex>/<完整hash>.<扩展名>`。
 - **转录笔记**：写入 `transcripts/` 目录，`type: transcript`，frontmatter 含：
   - `resource`（OKF 官方字段）：指向音频本体（如 `/assets/audio/9f/9f2c….webm`）。
-  - `duration_ms` / `mime` / `transcribed_by` / `language`：LMNotes 扩展字段。
+  - `duration_ms` / `mime` / `transcribed_by` / `language`：LMNotes 扩展字段。`transcribed_by` 标 `openai`/`whisper-cpp`，可看出本次是云端还是本地转录。
   - `id`：`at_voice_<4位>` 资源 ID。
 - 正文即转录文字。该笔记会自动进入增量索引，并被建议中心生成摘要/标签建议，可被搜索命中。
+
+> ⚠️ 录音发送云端转录受 [ADR-0005](adr/ADR-0005-llm-provider-guardrails.md) 护栏约束（默认 `cloud_allowed=false`，需显式开启）。本地 whisper.cpp 是 Local provider，护栏恒放行，音频不出本机。详见 [ADR-0006](adr/ADR-0006-voice-transcription.md) 与 [ADR-0007](adr/ADR-0007-local-stt-fallback.md)。
 
 ---
 
