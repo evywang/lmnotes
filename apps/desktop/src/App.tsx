@@ -179,6 +179,7 @@ export function App() {
             setActivePath(path);
             setTreeRefresh((n) => n + 1);
           }}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
       </Show>
       <Show when={settingsOpen()}>

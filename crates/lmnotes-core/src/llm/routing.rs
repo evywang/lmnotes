@@ -62,7 +62,9 @@ impl Registry {
     {
         let id = arc.id().to_string();
         self.chats.insert(id.clone(), arc.clone());
-        self.providers.insert(id, arc);
+        // providers map 首注册者胜出：同 id 再注册其他能力（如 transcribe）时
+        // 不覆盖原实例，避免 chat provider 被同 id 的 transcribe-only 实例顶掉。
+        self.providers.entry(id).or_insert(arc);
     }
 
     /// 注册一个 embed provider。
@@ -81,7 +83,7 @@ impl Registry {
     {
         let id = arc.id().to_string();
         self.embeds.insert(id.clone(), arc.clone());
-        self.providers.insert(id, arc);
+        self.providers.entry(id).or_insert(arc);
     }
 
     /// 按任务取 chat provider（首选 → 降级备选）。返回 (provider_arc, model)。
@@ -132,7 +134,7 @@ impl Registry {
     {
         let id = arc.id().to_string();
         self.transcribes.insert(id.clone(), arc.clone());
-        self.providers.insert(id, arc);
+        self.providers.entry(id).or_insert(arc);
     }
 
     /// 按任务取 transcribe provider（首选 → 降级备选）。返回 (provider_arc, model)。
@@ -396,5 +398,53 @@ mod tests {
         let r = Routing::default(); // 无任何路由
         let cands = reg.transcribe_candidates(&r, Task::Transcribe);
         assert!(cands.is_empty());
+    }
+
+    // ── providers map 首注册者胜出（同 id 多能力注册，评审 M2）────────────
+    #[test]
+    fn providers_map_keeps_first_registration_when_same_id_registers_another_capability() {
+        // OpenAi 场景：同 id 先注册 chat 实例，再注册同 id 的 transcribe-only 实例。
+        // providers map 必须保留 chat 实例（不被 transcribe 实例覆盖），
+        // 同时 transcribes map 仍能解析到 transcribe 实例。
+        struct SameIdTranscribe;
+        #[async_trait]
+        impl LlmProvider for SameIdTranscribe {
+            fn id(&self) -> &str {
+                "fake" // 与 FakeChat 同 id
+            }
+            fn kind(&self) -> ProviderKind {
+                ProviderKind::Cloud
+            }
+            fn capabilities(&self) -> Capabilities {
+                Capabilities::TRANSCRIBE
+            }
+            async fn health(&self) -> Result<bool> {
+                Ok(true)
+            }
+        }
+        #[async_trait]
+        impl TranscribeCap for SameIdTranscribe {
+            async fn transcribe(
+                &self,
+                _: AudioInput,
+                _: &str,
+                _: Option<&str>,
+            ) -> Result<Transcript> {
+                Ok(Transcript { text: "ok".into() })
+            }
+        }
+        let mut reg = Registry::new();
+        reg.register_chat(FakeChat); // id "fake"，capabilities = CHAT
+        reg.register_transcribe(SameIdTranscribe); // 同 id，capabilities = TRANSCRIBE
+        let listed = reg.get("fake").expect("provider must be listed");
+        assert_eq!(
+            listed.capabilities(),
+            Capabilities::CHAT,
+            "first registration must not be overwritten by the same-id transcribe instance"
+        );
+        // transcribe 能力仍可解析。
+        let r = routing(Task::Transcribe, "fake", &[]);
+        let (p, _) = reg.transcribe_for(&r, Task::Transcribe).unwrap();
+        assert_eq!(p.id(), "fake");
     }
 }

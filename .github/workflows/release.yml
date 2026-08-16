@@ -56,7 +56,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # 运行时注入 externalBin（dev 不需要，避免本地构建报缺二进制）。
           # tauri-action 会把此 JSON merge 进 tauri.conf.json。
-          TAURI_CONFIG: '{"bundle":{"externalBin":["binaries/whisper","binaries/ffmpeg"]}}'
+          # resources：whisper.exe 的伴生 DLL（ggml/whisper，见 fetch-sidecars.sh）
+          # 落到资源目录（Windows 安装目录 = 主程序同目录），DLL 搜索路径才能命中。
+          TAURI_CONFIG: '{"bundle":{"externalBin":["binaries/whisper","binaries/ffmpeg"],"resources":{"binaries/*.dll":"./"}}}'
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}

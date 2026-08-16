@@ -560,14 +560,17 @@ async fn transcribe_with_fallback(
     audio: lmnotes_core::llm::provider::AudioInput,
     language: Option<&str>,
 ) -> Result<(lmnotes_core::llm::provider::Transcript, String), String> {
-    eprintln!(
-        "transcribe: candidates = {:?}",
-        registry
-            .transcribe_candidates(routing, Task::Transcribe)
-            .iter()
-            .map(|(p, _)| p.id())
-            .collect::<Vec<_>>()
-    );
+    // 候选日志默认关闭（每次转录都打太吵）；LMNOTES_DEBUG=1 打开用于排查。
+    if std::env::var("LMNOTES_DEBUG").is_ok() {
+        eprintln!(
+            "transcribe: candidates = {:?}",
+            registry
+                .transcribe_candidates(routing, Task::Transcribe)
+                .iter()
+                .map(|(p, _)| p.id())
+                .collect::<Vec<_>>()
+        );
+    }
     lmnotes_core::llm::transcribe_fallback::try_transcribe_with_fallback(
         registry, routing, guard_cfg, audio, language,
     )
@@ -1267,8 +1270,8 @@ pub struct WhisperModel {
     pub label: String,
     /// 大致体积（MB）。
     pub size_mb: u64,
-    /// 中英文质量推荐语。
-    pub note: String,
+    /// 是否已下载到 ~/.lmnotes/models/（结构化标记；推荐语文案由前端 i18n 渲染）。
+    pub downloaded: bool,
     /// HF 下载直链。
     pub url: String,
 }
@@ -1285,6 +1288,7 @@ pub struct LocalSttStatus {
 }
 
 /// 内置模型清单（MVP 只列 base/small/medium；large 留后续）。
+/// 推荐语文案在前端 i18n（localStt.modelNote.<name>），后端只出结构化字段。
 fn builtin_whisper_models() -> Vec<WhisperModel> {
     let base = "https://huggingface.co/ggml-org/whisper.cpp/resolve/main";
     vec![
@@ -1292,39 +1296,37 @@ fn builtin_whisper_models() -> Vec<WhisperModel> {
             name: "base".into(),
             label: "Base (74M)".into(),
             size_mb: 142,
-            note: "体积最小，速度最快；英文尚可，中文一般。推荐首试。".into(),
+            downloaded: false,
             url: format!("{base}/ggml-base.bin"),
         },
         WhisperModel {
             name: "small".into(),
             label: "Small (244M)".into(),
             size_mb: 466,
-            note: "中英文质量与速度平衡；日常速记推荐。".into(),
+            downloaded: false,
             url: format!("{base}/ggml-small.bin"),
         },
         WhisperModel {
             name: "medium".into(),
             label: "Medium (769M)".into(),
             size_mb: 1480,
-            note: "中文质量好但慢、占空间；长录音场景用。".into(),
+            downloaded: false,
             url: format!("{base}/ggml-medium.bin"),
         },
     ]
 }
 
-/// 列出可选 whisper.cpp 模型 + 标记已下载。
+/// 列出可选 whisper.cpp 模型 + 标记已下载（结构化 downloaded 字段）。
 #[tauri::command]
 pub fn list_whisper_models() -> Vec<WhisperModel> {
     let downloaded: std::collections::HashSet<String> = list_downloaded_model_names();
-    let mut all = builtin_whisper_models();
-    // 把"已下载"信息塞进 note 前缀（前端可据此显示勾选）。
-    // 更结构化的做法是加 downloaded 字段，但保持向后兼容暂复用 note。
-    for m in &mut all {
-        if downloaded.contains(&m.name) {
-            m.note = format!("✓ 已下载 · {}", m.note);
-        }
-    }
-    all
+    builtin_whisper_models()
+        .into_iter()
+        .map(|mut m| {
+            m.downloaded = downloaded.contains(&m.name);
+            m
+        })
+        .collect()
 }
 
 /// 扫描 models/ 目录，返回已下载的模型名（去 ggml- 前缀与 .bin 后缀）。
@@ -1346,6 +1348,21 @@ fn list_downloaded_model_names() -> std::collections::HashSet<String> {
     set
 }
 
+/// 自动注册 whisper.cpp 时选模型：优先 base（默认推荐档），
+/// 否则确定性取一个已下载模型；无任何已下载模型时 None（退回 base 占位）。
+pub fn preferred_downloaded_model() -> Option<String> {
+    pick_preferred_model(&list_downloaded_model_names())
+}
+
+fn pick_preferred_model(names: &std::collections::HashSet<String>) -> Option<String> {
+    if names.contains("base") {
+        return Some("base".to_string());
+    }
+    let mut sorted: Vec<&String> = names.iter().collect();
+    sorted.sort();
+    sorted.into_iter().next().cloned()
+}
+
 /// 探测本地 STT 就绪状态（前端开语音浮窗前调用，决定是否需下载模型）。
 #[tauri::command]
 pub fn get_local_stt_status() -> LocalSttStatus {
@@ -1357,8 +1374,8 @@ pub fn get_local_stt_status() -> LocalSttStatus {
 }
 
 /// 推测 whisper.cpp sidecar 路径。
+/// 发布模式：Tauri externalBin 把 sidecar 安装到主程序同目录（resolve_sidecar 探测 exe 同级）。
 /// 开发模式（无 sidecar 打包）：探测 ~/.lmnotes/bin/whisper[.exe]（用户手动放）或 PATH。
-/// 发布模式：sidecar 解压到应用资源目录（此处用 env LMNOTES_SIDECAR_DIR 覆盖，或退化为 None）。
 pub fn whisper_binary_path() -> Option<PathBuf> {
     resolve_sidecar("whisper")
 }
@@ -1367,7 +1384,8 @@ pub fn ffmpeg_binary_path() -> Option<PathBuf> {
     resolve_sidecar("ffmpeg")
 }
 
-/// 解析 sidecar：依次查 env 覆盖、~/.lmnotes/bin/、PATH（which）。
+/// 解析 sidecar：依次查 env 覆盖、主程序同目录（externalBin 安装位）、
+/// ~/.lmnotes/bin/、PATH（which）。
 fn resolve_sidecar(name: &str) -> Option<PathBuf> {
     let exe_ext = if cfg!(windows) { ".exe" } else { "" };
     // 1) 环境变量显式覆盖（高级用户/CI）
@@ -1377,12 +1395,22 @@ fn resolve_sidecar(name: &str) -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    // 2) ~/.lmnotes/bin/<name>[.exe]
+    // 2) 主程序同目录：Tauri externalBin 在打包安装时的落点
+    //   （triple 后缀被剥回原始名，与主可执行文件并排）。
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let sibling = dir.join(format!("{name}{exe_ext}"));
+            if sibling.exists() {
+                return Some(sibling);
+            }
+        }
+    }
+    // 3) ~/.lmnotes/bin/<name>[.exe]（开发模式：用户手动放置）
     let local = lmnotes_home().join("bin").join(format!("{name}{exe_ext}"));
     if local.exists() {
         return Some(local);
     }
-    // 3) PATH（仅 Unix which；Windows 省略，依赖 Tauri sidecar 机制在发布时解析）
+    // 4) PATH（仅 Unix which；Windows 走上面的 exe 同目录探测）
     #[cfg(unix)]
     {
         if let Ok(out) = std::process::Command::new("which").arg(name).output() {
@@ -1398,8 +1426,8 @@ fn resolve_sidecar(name: &str) -> Option<PathBuf> {
 }
 
 /// 下载 whisper.cpp 模型到 ~/.lmnotes/models/。
-/// 流式下载，定期 emit 进度事件 `whisper-model-progress`。
-/// 返回本地模型文件路径。
+/// 断点续传（HTTP Range）+ 最多 3 次重试 + 30s 停滞超时（ADR-0007 §缓解）。
+/// 流式下载，定期 emit 进度事件 `whisper-model-progress`。返回本地模型文件路径。
 #[tauri::command]
 pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Result<String, String> {
     let model = builtin_whisper_models()
@@ -1413,27 +1441,113 @@ pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Resu
     let dest = dir.join(format!("ggml-{}.bin", name));
     let tmp = dir.join(format!("ggml-{name}.bin.part"));
 
-    // 流式下载 + 进度
-    let client = reqwest::Client::new();
-    let resp = client
-        .get(&model.url)
-        .send()
-        .await
-        .map_err(|e| format!("download request: {e}"))?;
+    // 幂等：已下载直接返回（顺手清理残留 .part）。
+    if dest.exists() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let _ = app.emit(
+            "whisper-model-progress",
+            serde_json::json!({ "name": name, "done": true }),
+        );
+        return Ok(dest.to_string_lossy().into_owned());
+    }
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    const MAX_ATTEMPTS: u32 = 3;
+    let stall = std::time::Duration::from_secs(30);
+    let mut last_err = String::new();
+    for attempt in 1..=MAX_ATTEMPTS {
+        match download_attempt(&client, &model.url, &tmp, &dest, &name, &app, stall).await {
+            Ok(path) => return Ok(path),
+            Err(e) => {
+                eprintln!("whisper model download attempt {attempt}/{MAX_ATTEMPTS} failed: {e}");
+                last_err = e;
+                // 失败保留 .part：下次尝试（或下次下载请求）从断点续传。
+                if attempt < MAX_ATTEMPTS {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
+
+/// 单次下载尝试：按已有 .part 大小发 Range 续传；连续 30s 无数据视为停滞失败。
+async fn download_attempt(
+    client: &reqwest::Client,
+    url: &str,
+    tmp: &std::path::Path,
+    dest: &std::path::Path,
+    name: &str,
+    app: &tauri::AppHandle,
+    stall: std::time::Duration,
+) -> Result<String, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+
+    // 断点：已有 .part 的字节数。
+    let mut start: u64 = tokio::fs::metadata(tmp).await.map(|m| m.len()).unwrap_or(0);
+    let mut resp = if start > 0 {
+        client
+            .get(url)
+            .header(reqwest::header::RANGE, format!("bytes={start}-"))
+            .send()
+            .await
+            .map_err(|e| format!("download request: {e}"))?
+    } else {
+        client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("download request: {e}"))?
+    };
+    if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
+        // .part 比远端文件大（损坏/上游变更）：丢弃从头下。
+        tokio::fs::remove_file(tmp)
+            .await
+            .map_err(|e| e.to_string())?;
+        start = 0;
+        resp = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("download request: {e}"))?;
+    }
     if !resp.status().is_success() {
         return Err(format!("download HTTP {}", resp.status()));
     }
-    let total = resp.content_length();
-    use futures_util::StreamExt;
+    // 206 = 续传命中（content_length 为剩余字节）；200 = 服务器未支持 Range，全量重下。
+    let resumed = resp.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+    let total = resp
+        .content_length()
+        .map(|r| if resumed { start + r } else { r });
+    let mut file = if resumed {
+        tokio::fs::OpenOptions::new()
+            .append(true)
+            .open(tmp)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        start = 0;
+        tokio::fs::File::create(tmp)
+            .await
+            .map_err(|e| e.to_string())?
+    };
+
     let mut stream = resp.bytes_stream();
-    let mut file = tokio::fs::File::create(&tmp)
-        .await
-        .map_err(|e| e.to_string())?;
-    use tokio::io::AsyncWriteExt;
-    let mut downloaded: u64 = 0;
+    let mut downloaded = start;
     let mut last_emit = std::time::Instant::now();
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| format!("download stream: {e}"))?;
+    loop {
+        let next = tokio::time::timeout(stall, stream.next())
+            .await
+            .map_err(|_| "download stalled: no data for 30s".to_string())?;
+        let bytes = match next {
+            None => break, // 流结束
+            Some(c) => c.map_err(|e| format!("download stream: {e}"))?,
+        };
         file.write_all(&bytes).await.map_err(|e| e.to_string())?;
         downloaded += bytes.len() as u64;
         // 节流：每 250ms emit 一次，避免事件风暴。
@@ -1451,7 +1565,7 @@ pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Resu
     }
     file.flush().await.map_err(|e| e.to_string())?;
     drop(file);
-    tokio::fs::rename(&tmp, &dest)
+    tokio::fs::rename(tmp, dest)
         .await
         .map_err(|e| e.to_string())?;
     let _ = app.emit(
@@ -1459,4 +1573,40 @@ pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Resu
         serde_json::json!({ "name": name, "done": true }),
     );
     Ok(dest.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pick_preferred_model;
+
+    fn names(list: &[&str]) -> std::collections::HashSet<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn pick_prefers_base_when_downloaded() {
+        assert_eq!(
+            pick_preferred_model(&names(&["small", "base"])),
+            Some("base".into())
+        );
+    }
+
+    #[test]
+    fn pick_falls_back_to_any_downloaded_model() {
+        // 只下载了 small/medium：必须选中已下载者（确定性取字典序最小），
+        // 否则自动注册会指向不存在的 ggml-base.bin。
+        assert_eq!(
+            pick_preferred_model(&names(&["small"])),
+            Some("small".into())
+        );
+        assert_eq!(
+            pick_preferred_model(&names(&["medium", "small"])),
+            Some("medium".into())
+        );
+    }
+
+    #[test]
+    fn pick_none_when_nothing_downloaded() {
+        assert_eq!(pick_preferred_model(&names(&[])), None);
+    }
 }

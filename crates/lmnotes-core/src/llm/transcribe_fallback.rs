@@ -75,12 +75,11 @@ pub async fn try_transcribe_with_fallback(
         // 护栏：音频不可字符串扫描，传空串 + local_only=false。
         match check(guard_cfg, provider.kind(), "", false) {
             GuardDecision::Allow => {}
-            GuardDecision::Deny(_) => {
-                if provider.kind() == ProviderKind::Cloud {
-                    // 云端被拒（cloud_allowed=false）：降级到下一个候选
-                    continue;
-                }
-                // 本地被拒（理论不会，保守跳过）
+            GuardDecision::Deny(reason) => {
+                // 记录拒绝原因：全部候选都被拒时错误信息可指明"护栏拒绝"而非笼统失败。
+                last_err = Some(CoreError::Conformance(format!(
+                    "transcribe denied by guard: {reason}"
+                )));
                 continue;
             }
         }
@@ -431,5 +430,28 @@ mod tests {
         let guard = GuardConfig::default();
         let result = try_transcribe_with_fallback(&reg, &routing, &guard, audio(), None).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn all_denied_by_guard_surfaces_deny_reason() {
+        // cloud_allowed=false 且无本地候选：错误应指明护栏拒绝原因（评审 M1），
+        // 而不是笼统的 "all transcribe providers failed"。
+        let mut reg = Registry::new();
+        reg.register_transcribe_arc(Arc::new(FakeTranscriber {
+            id: "cloud",
+            kind: ProviderKind::Cloud,
+            text: Some("from cloud"),
+            err: None,
+            calls: Arc::new(AtomicU32::new(0)),
+        }));
+        let routing = routing_with("cloud", &[]);
+        let guard = GuardConfig::default(); // cloud_allowed=false
+        let result = try_transcribe_with_fallback(&reg, &routing, &guard, audio(), None).await;
+        let err = result.expect_err("must fail when the only candidate is denied");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("denied by guard"),
+            "error should surface guard denial, got: {msg}"
+        );
     }
 }

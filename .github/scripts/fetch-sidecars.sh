@@ -58,6 +58,25 @@ fi
 cp "$WHISPER_BIN" "$BIN_DIR/whisper-$TARGET$EXT"
 chmod +x "$BIN_DIR/whisper-$TARGET$EXT" 2>/dev/null || true
 
+# whisper.exe 官方 Windows 构建动态链接 ggml.dll / whisper.dll。
+# Tauri externalBin 只打包"命名的可执行文件"，伴生 DLL 不会跟着进安装包；
+# 必须把它们放进 binaries/ 并经 bundle.resources（见 release.yml TAURI_CONFIG）
+# 落到安装目录（与主程序同目录），Windows 的 DLL 搜索路径才能命中。
+if [[ "$TARGET" == *windows* ]]; then
+  WHISPER_DIR="$(dirname "$WHISPER_BIN")"
+  DLL_COUNT=0
+  for dll in "$WHISPER_DIR"/ggml*.dll "$WHISPER_DIR"/whisper*.dll; do
+    [[ -e "$dll" ]] || continue
+    cp "$dll" "$BIN_DIR/"
+    DLL_COUNT=$((DLL_COUNT + 1))
+  done
+  if [[ "$DLL_COUNT" -eq 0 ]]; then
+    echo ":: WARNING: no companion DLLs beside whisper.exe (static build?) — verify the packaged exe starts on a clean machine"
+  else
+    echo ":: Copied $DLL_COUNT companion DLL(s) for whisper.exe"
+  fi
+fi
+
 echo ":: Fetching ffmpeg for $TARGET"
 cd "$WORK_DIR"
 if [[ "$TARGET" == *windows* ]]; then

@@ -6,13 +6,21 @@
  *
  * 后端命令：
  *   get_local_stt_status -> { binary_available, ffmpeg_available, models: string[] }
- *   list_whisper_models  -> [{ name, label, size_mb, note, url }]
+ *   list_whisper_models  -> [{ name, label, size_mb, downloaded, url }]
  *   download_whisper_model(name) -> path（流式下载，emit whisper-model-progress 事件）
+ * 模型推荐语文案在后端只出结构化字段，由前端 i18n（localStt.modelNote.<name>）渲染。
  */
 import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { t } from "../i18n";
+import { t, type MessageKey } from "../i18n";
+
+/** 模型短名 → 推荐语 i18n key（后端只出结构化字段，文案随 locale 切换）。 */
+const MODEL_NOTES: Record<string, MessageKey> = {
+  base: "localStt.modelNote.base",
+  small: "localStt.modelNote.small",
+  medium: "localStt.modelNote.medium",
+};
 
 interface LocalSttStatus {
   binary_available: boolean;
@@ -24,7 +32,7 @@ interface WhisperModel {
   name: string;
   label: string;
   size_mb: number;
-  note: string;
+  downloaded: boolean;
   url: string;
 }
 
@@ -117,7 +125,7 @@ export function LocalSttSetup() {
         >
           <For each={models()}>
             {(m) => {
-              const isDownloaded = () => status()?.models.includes(m.name) ?? false;
+              const isDownloaded = () => m.downloaded || (status()?.models.includes(m.name) ?? false);
               const isDownloading = () => downloading() === m.name;
               return (
                 <div class="local-stt-model-row">
@@ -127,7 +135,11 @@ export function LocalSttSetup() {
                       {m.label}
                     </strong>
                     <span class="muted small">
-                      {m.size_mb} MB · {m.note}
+                      {m.size_mb} MB
+                      <Show when={MODEL_NOTES[m.name]}>
+                        {" · "}
+                        {t(MODEL_NOTES[m.name]!)}
+                      </Show>
                     </span>
                     <Show when={isDownloading() && progress()}>
                       {(p) => (

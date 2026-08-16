@@ -35,7 +35,8 @@ export const en = {
   "voice.processing": "Transcribing…",
   "voice.permissionDenied": "Microphone permission denied.",
   "voice.errorTranscribe": "Transcription failed: {msg}",
-  "voice.cloudDownNoLocal": "Cloud transcribe unavailable and no local STT ready. Download a model below to enable offline fallback.",
+  "voice.cloudDownNoLocal": "Cloud transcribe unavailable and no local STT ready. You can download a local model to enable offline fallback.",
+  "voice.openSettings": "Open settings to download a model",
 
   // ── Local STT (whisper.cpp fallback, ADR-0007) ────────────────────────
   "localStt.title": "🎙️ Local STT (offline fallback)",
@@ -50,6 +51,9 @@ export const en = {
   "localStt.downloadingIndeterminate": "Downloading… {downloaded} MB",
   "localStt.downloadFailed": "Download failed: {msg}",
   "localStt.noModelsDownloaded": "No models downloaded yet.",
+  "localStt.modelNote.base": "Smallest and fastest; decent English, mediocre Chinese. Recommended first try.",
+  "localStt.modelNote.small": "Best quality/speed balance for Chinese and English; recommended for daily notes.",
+  "localStt.modelNote.medium": "Good Chinese quality but slow and large; for long recordings.",
 
   // ── Chat drawer ───────────────────────────────────────────────────────────────
   "chat.title": "💬 Chat with Vault",

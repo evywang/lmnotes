@@ -229,11 +229,21 @@ impl Config {
 
     /// 映射到核心层的 Registry + Routing + GuardConfig。
     pub fn build(&self) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
+        self.build_with_probe(&SidecarProbe::real())
+    }
+
+    /// 同 build()，但 sidecar/模型探测可注入（单测伪造，不依赖真实文件系统）。
+    pub(crate) fn build_with_probe(
+        &self,
+        probe: &SidecarProbe,
+    ) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
         use lmnotes_core::llm::ollama::OllamaProvider;
         use lmnotes_core::llm::openai::OpenAiProvider;
         use lmnotes_core::llm::whisper::WhisperProvider;
         let mut reg = lmnotes_core::llm::routing::Registry::new();
         let mut user_configured_whisper_cpp = false;
+        // 注册成功时本地 whisper.cpp 实际使用的模型短名（路由表与之保持一致）。
+        let mut effective_local_model: Option<String> = None;
         for p in &self.providers {
             match p {
                 ProviderConfig::Ollama { base_url, .. } => {
@@ -264,8 +274,10 @@ impl Config {
                         binary_path.as_deref(),
                         ffmpeg_path.as_deref(),
                         *threads,
+                        probe,
                     ) {
                         user_configured_whisper_cpp = true;
+                        effective_local_model = Some(effective_model(model.as_deref(), probe));
                     }
                 }
             }
@@ -286,19 +298,20 @@ impl Config {
         // 自动注册 whisper.cpp 作为本地降级 provider（ADR-0007 §决策"开箱可用"）：
         // 即使用户 config.json 未声明 WhisperCpp，只要 sidecar 可探测到就注册，
         // 使其天然成为云端 transcribe 的 fallback。
+        // 模型取实际已下载者（优先 base）——用户经 UI 下载 small/medium 后，
+        // 不能仍指向默认 base，否则 model_path 落在未下载的 ggml-base.bin 上。
         let auto_whisper_cpp = if !user_configured_whisper_cpp {
-            register_whisper_cpp(
-                &mut reg,
-                Some("base"),
-                None,
-                None,
-                default_whisper_threads(),
-            )
+            let ok =
+                register_whisper_cpp(&mut reg, None, None, None, default_whisper_threads(), probe);
+            if ok {
+                effective_local_model = Some(effective_model(None, probe));
+            }
+            ok
         } else {
             false
         };
         let whisper_cpp_registered = user_configured_whisper_cpp || auto_whisper_cpp;
-        let routing = self.build_routing(whisper_cpp_registered);
+        let routing = self.build_routing(whisper_cpp_registered, &effective_local_model);
         let guard = GuardConfig {
             cloud_allowed: self.guard.cloud_allowed,
             sensitive_patterns: self.guard.sensitive_patterns.clone(),
@@ -306,7 +319,7 @@ impl Config {
         (reg, routing, guard)
     }
 
-    fn build_routing(&self, whisper_cpp_registered: bool) -> Routing {
+    fn build_routing(&self, whisper_cpp_registered: bool, local_model: &Option<String>) -> Routing {
         let mut map = std::collections::HashMap::new();
         let to_ref = |r: &ProviderRefSer| {
             (
@@ -334,10 +347,12 @@ impl Config {
         }
         // Transcribe 路由：primary + whisper-cpp 作为本地降级 fallback（ADR-0007）。
         // primary 来自显式 routing.transcribe、或自动派生的云端 provider、或仅本地。
+        // local 的 model 与注册时的模型选择保持一致（已下载者，缺省 base）。
+        let local_model = local_model.clone().unwrap_or_else(|| "base".to_string());
         let local_fb = if whisper_cpp_registered {
             vec![ProviderRef {
                 provider_id: "whisper-cpp".into(),
-                model: "base".into(),
+                model: local_model.clone(),
             }]
         } else {
             vec![]
@@ -373,7 +388,7 @@ impl Config {
                 (
                     ProviderRef {
                         provider_id: "whisper-cpp".into(),
-                        model: "base".into(),
+                        model: local_model,
                     },
                     vec![],
                 ),
@@ -399,37 +414,78 @@ impl Config {
     }
 }
 
-/// 注册 whisper.cpp 本地 provider 到 Registry。返回是否成功注册（sidecar+模型可达）。
-/// 失败（binary/模型不可达）静默跳过——本地 STT 在运行时降级时由前端引导下载。
-/// 路径优先级：用户显式 binary_path > commands::resolve_sidecar > 放弃。
+/// sidecar / 已下载模型探测结果。可注入：单测用伪造值，运行时用 `real()`。
+pub(crate) struct SidecarProbe {
+    pub whisper: Option<std::path::PathBuf>,
+    pub ffmpeg: Option<std::path::PathBuf>,
+    /// 自动注册时选中的已下载模型（优先 base）；None = 无已下载模型。
+    pub preferred_model: Option<String>,
+}
+
+impl SidecarProbe {
+    fn real() -> Self {
+        Self {
+            whisper: crate::commands::whisper_binary_path(),
+            ffmpeg: crate::commands::ffmpeg_binary_path(),
+            preferred_model: crate::commands::preferred_downloaded_model(),
+        }
+    }
+}
+
+/// 模型短名决策链：用户显式 > 已下载探测 > "base" 占位。
+fn effective_model(user: Option<&str>, probe: &SidecarProbe) -> String {
+    user.or(probe.preferred_model.as_deref())
+        .unwrap_or("base")
+        .to_string()
+}
+
+/// 注册 whisper.cpp 本地 provider 到 Registry。返回是否成功注册（sidecar 可达）。
+/// 失败（binary 不可达）静默跳过——本地 STT 在运行时降级时由前端引导下载。
+/// 路径优先级：用户显式 binary_path > probe 探测（exe 同目录/env/~/.lmnotes/bin）。
 fn register_whisper_cpp(
     reg: &mut lmnotes_core::llm::routing::Registry,
     model: Option<&str>,
     binary_path: Option<&str>,
     ffmpeg_path: Option<&str>,
     threads: usize,
+    probe: &SidecarProbe,
 ) -> bool {
-    use crate::commands::{ffmpeg_binary_path, models_dir, whisper_binary_path};
+    let Some(provider) = resolve_whisper_cpp(model, binary_path, ffmpeg_path, threads, probe)
+    else {
+        return false;
+    };
+    reg.register_transcribe(provider);
+    true
+}
+
+/// 组装 WhisperCppProvider（纯装配，不碰文件系统，便于单测注入 probe）。
+fn resolve_whisper_cpp(
+    model: Option<&str>,
+    binary_path: Option<&str>,
+    ffmpeg_path: Option<&str>,
+    threads: usize,
+    probe: &SidecarProbe,
+) -> Option<crate::whisper_cpp::WhisperCppProvider> {
+    use crate::commands::models_dir;
     use crate::whisper_cpp::WhisperCppProvider;
-    let model_name = model.unwrap_or("base");
     // binary：显式 > 自动探测
-    let binary = if let Some(p) = binary_path {
-        Some(std::path::PathBuf::from(p))
-    } else {
-        whisper_binary_path()
-    };
-    let Some(binary) = binary else {
-        return false; // sidecar 不可达
-    };
+    let binary = binary_path
+        .map(std::path::PathBuf::from)
+        .or_else(|| probe.whisper.clone())?;
     // ffmpeg：显式 > 自动探测（None 允许——仅 WAV 直通场景）
     let ffmpeg = ffmpeg_path
         .map(std::path::PathBuf::from)
-        .or_else(ffmpeg_binary_path);
+        .or_else(|| probe.ffmpeg.clone());
     // 模型：~/.lmnotes/models/ggml-<name>.bin
+    let model_name = effective_model(model, probe);
     let model_p = models_dir().join(format!("ggml-{model_name}.bin"));
-    let provider = WhisperCppProvider::new("whisper-cpp", binary, ffmpeg, model_p, threads);
-    reg.register_transcribe(provider);
-    true
+    Some(WhisperCppProvider::new(
+        "whisper-cpp",
+        binary,
+        ffmpeg,
+        model_p,
+        threads,
+    ))
 }
 
 #[cfg(test)]
@@ -554,5 +610,116 @@ mod tests {
             }
             other => panic!("expected WhisperCpp, got {other:?}"),
         }
+    }
+
+    // ── 自动注册（注入 SidecarProbe，评审 I7）────────────────────────────
+
+    fn probe_with_sidecar(model: Option<&str>) -> SidecarProbe {
+        SidecarProbe {
+            whisper: Some(std::path::PathBuf::from("/fake/bin/whisper.exe")),
+            ffmpeg: Some(std::path::PathBuf::from("/fake/bin/ffmpeg.exe")),
+            preferred_model: model.map(String::from),
+        }
+    }
+
+    #[test]
+    fn auto_registers_whisper_cpp_as_fallback_when_sidecar_available() {
+        // 云端 provider 在、sidecar 可探测 → 候选 = [cloud, whisper-cpp]。
+        let cfg = config_with_transcribe(Some("whisper-1"), None);
+        let (reg, routing, _) = cfg.build_with_probe(&probe_with_sidecar(Some("small")));
+        let cands = reg.transcribe_candidates(&routing, Task::Transcribe);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0].0.id(), "openai");
+        assert_eq!(cands[1].0.id(), "whisper-cpp");
+        // 路由 fallback 槽位的 model 与注册模型一致（已下载 small）。
+        assert_eq!(cands[1].1, "small");
+    }
+
+    #[test]
+    fn no_auto_registration_without_sidecar() {
+        // sidecar 探测不到 → 不注册 whisper-cpp，候选只有云端。
+        let cfg = config_with_transcribe(Some("whisper-1"), None);
+        let probe = SidecarProbe {
+            whisper: None,
+            ffmpeg: None,
+            preferred_model: Some("small".into()),
+        };
+        let (reg, routing, _) = cfg.build_with_probe(&probe);
+        let cands = reg.transcribe_candidates(&routing, Task::Transcribe);
+        assert_eq!(cands.len(), 1);
+        assert!(!reg.list().contains(&"whisper-cpp"));
+    }
+
+    #[test]
+    fn local_only_mode_when_no_cloud_provider() {
+        // 无云端 provider 但 sidecar 可用 → whisper-cpp 当 primary。
+        let cfg = Config::default();
+        let (reg, routing, _) = cfg.build_with_probe(&probe_with_sidecar(None));
+        let cands = reg.transcribe_candidates(&routing, Task::Transcribe);
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].0.id(), "whisper-cpp");
+        // 无已下载模型 → 路由 model 占位 base。
+        assert_eq!(cands[0].1, "base");
+    }
+
+    #[test]
+    fn user_configured_whisper_cpp_wins_over_auto() {
+        // 用户显式声明 whisper_cpp（model=medium）→ 只注册一个实例，
+        // 且不触发自动注册的模型选择（保持用户的 medium）。
+        let cfg: Config = serde_json::from_str(
+            r#"{
+            "providers": [
+                {"type":"openai","id":"openai","base_url":"https://api.openai.com/v1",
+                 "api_key":"sk-test","chat_model":"gpt-4o-mini","embed_model":"e",
+                 "transcribe_model":"whisper-1"},
+                {"type":"whisper_cpp","model":"medium"}
+            ],
+            "routing": {},
+            "guard": {"cloud_allowed": true, "sensitive_patterns": []}
+        }"#,
+        )
+        .unwrap();
+        // probe 声称已下载 base：自动注册会选 base，但用户显式 medium 必须胜出。
+        let (reg, routing, _) = cfg.build_with_probe(&probe_with_sidecar(Some("base")));
+        let cands = reg.transcribe_candidates(&routing, Task::Transcribe);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[1].1, "medium", "explicit user model must win");
+    }
+
+    #[test]
+    fn resolve_uses_preferred_downloaded_model_when_user_silent() {
+        // C2 回归：自动注册选中已下载的 small，而不是硬编码 base。
+        let p = resolve_whisper_cpp(None, None, None, 4, &probe_with_sidecar(Some("small")));
+        let provider = p.expect("sidecar available should resolve");
+        assert!(provider
+            .model_path()
+            .to_string_lossy()
+            .ends_with("ggml-small.bin"));
+    }
+
+    #[test]
+    fn resolve_without_sidecar_is_none() {
+        let probe = SidecarProbe {
+            whisper: None,
+            ffmpeg: None,
+            preferred_model: Some("small".into()),
+        };
+        assert!(resolve_whisper_cpp(None, None, None, 4, &probe).is_none());
+    }
+
+    #[test]
+    fn resolve_explicit_binary_path_bypasses_probe() {
+        // 用户显式 binary_path 时，即使 probe 探测不到也能注册。
+        let probe = SidecarProbe {
+            whisper: None,
+            ffmpeg: None,
+            preferred_model: None,
+        };
+        let p = resolve_whisper_cpp(Some("medium"), Some("/custom/whisper"), None, 2, &probe);
+        let provider = p.expect("explicit binary path should resolve");
+        assert!(provider
+            .model_path()
+            .to_string_lossy()
+            .ends_with("ggml-medium.bin"));
     }
 }

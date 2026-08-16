@@ -158,6 +158,8 @@ fn build_whisper_cmd(
     threads: usize,
 ) -> Command {
     let mut cmd = Command::new(binary);
+    // 超时 drop future 时必须连带 kill 子进程，否则留下孤儿进程持续烧 CPU。
+    cmd.kill_on_drop(true);
     cmd.arg("-m").arg(model);
     cmd.arg("-f").arg(wav);
     cmd.arg("-otxt");
@@ -173,8 +175,9 @@ fn build_whisper_cmd(
 
 /// 跑 ffmpeg 把任意音频转 16kHz mono PCM WAV（whisper.cpp 输入要求）。
 async fn run_ffmpeg_transcode(ffmpeg: &Path, in_path: &Path, out_path: &Path) -> Result<()> {
-    let output = Command::new(ffmpeg)
-        .arg("-y")
+    let mut cmd = Command::new(ffmpeg);
+    cmd.kill_on_drop(true);
+    cmd.arg("-y")
         .arg("-i")
         .arg(in_path)
         .arg("-ar")
@@ -183,9 +186,11 @@ async fn run_ffmpeg_transcode(ffmpeg: &Path, in_path: &Path, out_path: &Path) ->
         .arg("1")
         .arg("-c:a")
         .arg("pcm_s16le")
-        .arg(out_path)
-        .output()
+        .arg(out_path);
+    // 与 whisper 步骤同享 60s 上限：损坏输入/异常编码不应挂死整条命令。
+    let output = tokio::time::timeout(Duration::from_secs(60), cmd.output())
         .await
+        .map_err(|_| lmnotes_core::CoreError::Conformance("ffmpeg timed out (60s)".into()))?
         .map_err(lmnotes_core::CoreError::Io)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
