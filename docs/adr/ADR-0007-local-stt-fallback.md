@@ -28,10 +28,14 @@ ADR-0006 把语音转录 MVP 落到云端 Whisper API，并把"本地 whisper.cp
 1. **whisper.cpp 二进制：Tauri sidecar 打包**。`tauri.conf.json` 的 `externalBin` 在 release 时经 `TAURI_CONFIG` 注入
    （dev 不注入，避免本地构建报缺二进制）；CI（`.github/scripts/fetch-sidecars.sh`）从 `ggml-org/whisper.cpp` releases
    下载预编译包，按 target-triple 命名（`whisper-x86_64-pc-windows-msvc.exe` 等）。**不静态链接权重**（遵 ADR-0006 §决策1）。
-   运行时路径解析：env 覆盖 > `~/.lmnotes/bin/` > PATH（Unix `which`）。Capabilities 加 scoped `shell:allow-execute`。
+   官方 Windows 构建动态链接 `ggml.dll`/`whisper.dll`——externalBin 只打包命名的 exe，伴生 DLL 经
+   `bundle.resources`（`binaries/*.dll → ./`）落到安装目录（与主程序同目录），DLL 搜索路径才能命中。
+   运行时路径解析：env 覆盖 > **主程序同目录（externalBin 安装落点）** > `~/.lmnotes/bin/` > PATH（Unix `which`）。
+   sidecar 由 Rust 侧 `tokio::process` 直接 spawn，JS 无需 shell 权限（capabilities 不含 shell 条目）。
 
 2. **模型权重：首次按需下载**。`~/.lmnotes/models/ggml-<name>.bin`，来源 HuggingFace `ggml-org/whisper.cpp`。
-   `download_whisper_model` 命令流式下载 + `whisper-model-progress` 事件（250ms 节流）。安装包不增重。`.gitignore` 加 `ggml-*.bin`/`*.gguf`。
+   `download_whisper_model` 命令流式下载 + `whisper-model-progress` 事件（250ms 节流）；实现**断点续传（HTTP Range，
+   `.part` 文件跨次续传）+ 最多 3 次重试 + 连接 15s / 停滞 30s 超时**。安装包不增重。`.gitignore` 加 `ggml-*.bin`/`*.gguf`。
 
 3. **`WhisperCppProvider` 置 Tauri 壳层**（`apps/desktop/src-tauri/src/whisper_cpp.rs`），非 `lmnotes-core`。
    理由：它要 `tokio::process`/`tokio::fs`（触核心层 `std::fs` 禁令），且不被核心层其他模块复用。
@@ -48,7 +52,9 @@ ADR-0006 把语音转录 MVP 落到云端 Whisper API，并把"本地 whisper.cp
    - 每个候选独立过护栏：云端被 `cloud_allowed=false` 拒时**降级**到本地（而非直接报错），让本地能接手。
 
 6. **配置**：`ProviderConfig` 加 `WhisperCpp { model, binary_path, ffmpeg_path, threads }` 变体（用户可显式调参）；
-   默认 `threads=4`、`model=base`。`probe_providers` 加 WhisperCpp 分支，探测 binary+model 存在性。
+   默认 `threads=4`。模型选择决策链：**用户显式 > 已下载探测（优先 base）> "base" 占位**——自动注册指向实际
+   已下载的模型，避免用户经 UI 下载 small/medium 后仍指向未下载的 ggml-base.bin。`probe_providers` 加 WhisperCpp
+   分支，探测 binary+model 存在性。
 
 7. **前端**：`LocalSttSetup.tsx`（挂在 ProviderSettings）显示引擎状态 + 模型列表 + 下载进度。
    `VoiceCapture` 在云端不可达且本地未就绪时引导用户下载（错误文案 `voice.cloudDownNoLocal`）。

@@ -22,9 +22,10 @@ crates/
   lmnotes-mcp/    # Embedded read-only MCP server (loopback only)
 apps/desktop/
   src/            # SolidJS frontend: App.tsx + {capture,chat,editor,graph,
-                  #   i18n,settings,store,suggestions,components}
-  src-tauri/src/  # Tauri shell: commands.rs (IPC), lib.rs (run/wiring), llm_config.rs
-docs/             # specs/PRD.md, adr/ADR-0001..0005, okf/, user-manual.md, superpowers/plans/
+                  #   i18n,settings,store,suggestions,voice,components}
+  src-tauri/src/  # Tauri shell: commands.rs (IPC), lib.rs (run/wiring),
+                  #   llm_config.rs, whisper_cpp.rs (local STT sidecar)
+docs/             # specs/PRD.md, adr/ADR-0001..0007, okf/, testing/, user-manual.md, superpowers/plans/
 ```
 
 ## Commands (match CI exactly)
@@ -113,3 +114,4 @@ Voice input / speech-to-text is **FR-CAP-05** + **FR-MEDIA-01** + **FR-MEDIA-05*
   subprocesses + writes temp WAVs → ADR-0002 boundary). Models download on-demand
   to `~/.lmnotes/models/`. Runtime fallback logic: `transcribe_with_fallback` in
   `commands.rs` + `Registry::transcribe_candidates` in `routing.rs`.
+- Test plan for the voice feature: `docs/testing/voice-input.md`.

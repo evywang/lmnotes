@@ -242,11 +242,15 @@ cargo test -p lmnotes-desktop --lib -- build_auto_derives build_without explicit
 
 **步骤**：
 1. 开始录音 → 录音中点浮窗外部（overlay 空白处）。
+2. 开始录音 → 按 `Esc`。
+3. 未录音（空闲）→ 按 `Esc`。
 
 **预期**：
-- 浮窗关闭；`onCleanup` 停止 recorder 与计时器（代码：`recorder.stop()` + `clearInterval`）。
-- 麦克风指示灯熄灭（stream.getTracks().stop() 在 onstop 里——注意：若直接关窗未触发 onstop，track 可能未释放；
-  **审查发现**：onCleanup 调 `recorder.stop()` 会触发 onstop → `stream.getTracks().stop()`，链路是通的）。
+- 录音中点外部**不**关闭浮窗（防误触丢失录音；overlay onClick 在 recording/processing 时为 undefined）。
+- 录音中按 `Esc`：取消录音（不转录）并关闭浮窗；`onCleanup` 停止 recorder 与计时器
+  （`recorder.stop()` + `clearInterval`；`cancelled` 标记使 onstop 跳过转录）。
+- 麦克风指示灯熄灭（onstop 里 `stream.getTracks().stop()`，链路是通的）。
+- 空闲时按 `Esc`：直接关闭浮窗。
 
 ---
 
@@ -330,14 +334,14 @@ cargo test -p lmnotes-desktop --lib -- build_auto_derives build_without explicit
 
 **步骤**：
 1. 设置 → 本地 STT → 点下载 small（~466MB）。
-2. 下载到一半断网/关应用。
-3. 重新打开，再次点下载。
+2. 下载到一半断网（或等停滞超时：连续 30s 无数据自动判失败）。
+3. 恢复网络，再次点下载（或等待自动重试，单次调用内最多 3 次尝试）。
 
 **预期**：
-- 进度条从 0 重新计（当前实现未做断点续传的续传，而是 `.part` 临时文件被覆盖重下）。
-- 完整下载完成后 `.part` 重命名为 `ggml-small.bin`，状态刷新为已下载。
-
-> 已知限制：当前 `download_whisper_model` 未实现 HTTP Range 断点续传，中断需重头下。后续可加。
+- 中断后重试从**断点续传**（HTTP Range，基于 `.part` 已有字节数；进度条从断点处继续而非 0）。
+- 单次下载调用内自动重试最多 3 次（间隔 2s），全部失败才报错；`.part` 保留供下次续传。
+- `.part` 比远端文件大（416）时自动丢弃重下。
+- 完整下载完成后 `.part` 重命名为 `ggml-small.bin`，状态刷新为已下载；已下载模型再次点下载幂等返回。
 
 ---
 
@@ -422,9 +426,24 @@ python -m http.server 8080  # 仅示意；实际需响应 POST /audio/transcript
 | 1 | 🔴 高 | 用户在 provider 填 `transcribe_model` 但 UI 不写 `routing.transcribe` → `transcribe_for` 报 "no routing"，功能不可用 | ✅ 已修：`build_routing()` 自动从首个带 `transcribe_model` 的 provider 派生；加 §2.4 回归测试 |
 | 2 | 🟡 中 | 录制失败后录音按钮 `disabled`，用户无法在同一浮窗重试 | ✅ 已修：移除 `disabled={!!error()}`，`start()` 已清错 |
 | 3 | 🟡 中 | 音频**先归档后检查护栏**，被 cloud_allowed 拒绝时音频已落盘 | 📝 已知行为，记 TC-M03；不阻塞 MVP，后续可调整顺序 |
-| 4 | 🟢 低 | 未配 transcribe provider 时前端无优雅提示，只透传后端错误 | 📝 记 TC-M04；后续可在开浮窗前预检 |
+| 4 | 🟢 低 | 未配 transcribe provider 时前端无优雅提示，只透传后端错误 | ✅ 已修：转录失败且本地 STT 未就绪时，浮窗显示 `voice.cloudDownNoLocal` + 「打开设置下载模型」按钮跳设置面板 |
 | 5 | 🟢 低 | 设置 UI 健康检查不探测 Whisper provider（只探 chat/embed） | 📝 小优化，后续可加 |
 | 6 | 🟢 低 | `archive_binary` 用同步 `full.exists()`（Tauri 壳层允许，非 bug） | 📝 不改 |
+
+### 5.1 二轮评审追加修复（feat/voice-input 复审）
+
+| # | 严重度 | 问题 | 状态 |
+|---|---|---|---|
+| 7 | 🔴 高 | 打包版 sidecar 永远解析不到（`resolve_sidecar` 只查 env/~/.lmnotes/bin/which，不查主程序同目录 = externalBin 安装落点）→ 本地降级在发布版失效 | ✅ 已修：`resolve_sidecar` 第 2 优先级探测 `current_exe()` 同目录 |
+| 8 | 🔴 高 | 自动注册硬编码 model="base"，UI 下载 small/medium 后降级仍指向不存在的 ggml-base.bin | ✅ 已修：模型决策链 用户显式 > 已下载（优先 base，`preferred_downloaded_model`）> base 占位；含单测 |
+| 9 | 🟡 中 | whisper/ffmpeg 子进程超时不 kill（无 `kill_on_drop`）；ffmpeg 无超时 | ✅ 已修：两者均 `kill_on_drop(true)` + 60s 超时 |
+| 10 | 🟡 中 | 模型下载无超时/重试/断点续传（ADR 承诺未兑现） | ✅ 已修：Range 续传 + 3 次重试 + 连接 15s/停滞 30s 超时 |
+| 11 | 🟡 中 | 后端硬编码中文模型推荐语（绕过 i18n） | ✅ 已修：`WhisperModel.downloaded` 结构化字段；文案走 `localStt.modelNote.*`（zh/en） |
+| 12 | 🟡 中 | 注册路径零测试覆盖（sidecar 有/无、模型选择矩阵） | ✅ 已修：`SidecarProbe` 可注入 + `build_with_probe` 测试矩阵 |
+| 13 | 🟡 中 | Windows whisper.exe 伴生 DLL（ggml/whisper.dll）不进安装包 → 缺 DLL 启动失败 | ✅ 已修：fetch-sidecars.sh 拷贝伴生 DLL + `bundle.resources` 落安装目录；需发版时在干净机器验证 |
+| 14 | 🟢 低 | 全部候选被护栏拒时错误信息笼统（吞掉拒绝原因） | ✅ 已修：Deny 原因写入 `last_err`（含单测） |
+| 15 | 🟢 低 | 同 id 多能力注册覆盖 `providers` map（chat 实例被 transcribe 实例顶掉） | ✅ 已修：`providers` 首注册者胜出（含单测） |
+| 16 | 🟢 低 | 每次转录打候选 eprintln 噪声；JS 侧 shell:allow-execute 权限无消费方 | ✅ 已修：日志门控 `LMNOTES_DEBUG`；capabilities 移除 shell 条目 |
 
 ---
 
