@@ -14,3 +14,6 @@ apps/desktop/src-tauri/binaries/
 ggml-*.bin
 *.gguf
 
+
+# ZCode agent session state（会话计划等，不入仓库；归档版在 docs/superpowers/plans/）
+.zcode/
