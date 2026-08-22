@@ -4,14 +4,18 @@
 # 用法：fetch-sidecars.sh <target-triple>
 #   target-triple 形如 x86_64-pc-windows-msvc / x86_64-unknown-linux-gnu
 #
-# 输出：apps/desktop/src-tauri/binaries/<name>-<target-triple>[.exe]
+# 输出：apps/desktop/src-tauri/binaries/<name>-<target-triple>[.exe]（+ Windows 伴生 DLL）
 # 失败即 exit 1（release 不应静默缺 sidecar）。
 #
-# 二进制来源：
-#   whisper.cpp: https://github.com/ggerganov/whisper.cpp/releases （whisper-bin-x64.zip / .tar.gz）
-#   ffmpeg:      Win 用 BtbN/FFmpeg-Builds；Linux 用 johnvansickle/ffmpeg 静态构建
+# 二进制来源（2026-08 实测）：
+#   whisper.cpp: ggml-org/whisper.cpp 最新 release（仓库已从 ggerganov 迁至 ggml-org；
+#                旧 v1.7.1 无预编译资产）。CLI 名为 whisper-cli(.exe)（旧版叫 main）。
+#                Windows zip 为动态链接构建：whisper-cli.exe 依赖 whisper.dll/ggml*.dll。
+#   ffmpeg:      Win 用 BtbN/FFmpeg-Builds win64-lgpl（静态单文件，无 DLL 依赖）；
+#                Linux 用 johnvansickle 静态构建。
 #
-# 注意：具体 release tag/asset 名称可能随上游变化，需定期更新本脚本。
+# 优先用 gh release download（走 API，认证 + 稳定；GitHub runner 自带 gh）。
+# 注意：上游资产名可能随版本变化，失败时先 gh release view 核对资产清单。
 set -euo pipefail
 
 TARGET="${1:?usage: fetch-sidecars.sh <target-triple>}"
@@ -23,17 +27,23 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 mkdir -p "$BIN_DIR"
 
+# 解析 whisper.cpp 最新 release tag（资产名随版本号走，但模式固定 whisper-bin-*）
+WHISPER_TAG="$(gh release view --repo ggml-org/whisper.cpp --json tagName --jq .tagName)"
+echo ":: whisper.cpp latest tag: $WHISPER_TAG"
+
 case "$TARGET" in
   x86_64-pc-windows-msvc)
     EXT=".exe"
-    # whisper.cpp Windows 预编译：whisper-bin-x64.zip（含 whisper.exe + dll 们）
-    WHISPER_URL="https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.1/whisper-bin-x64.zip"
-    # ffmpeg Windows：BtbN 的 lgpl-shared x86_64 build
-    FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip"
+    WHISPER_ASSET="whisper-bin-x64.zip"
+    WHISPER_BIN_NAME="whisper-cli.exe"
+    FFMPEG_REPO="BtbN/FFmpeg-Builds"
+    FFMPEG_ASSET="ffmpeg-master-latest-win64-lgpl.zip"
+    FFMPEG_BIN_NAME="ffmpeg.exe"
     ;;
   x86_64-unknown-linux-gnu)
     EXT=""
-    WHISPER_URL="https://github.com/ggerganov/whisper.cpp/releases/download/v1.7.1/whisper-bin-x64.tar.gz"
+    WHISPER_ASSET="whisper-bin-ubuntu-x64.tar.gz"
+    WHISPER_BIN_NAME="whisper-cli"
     FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
     ;;
   *)
@@ -42,53 +52,55 @@ case "$TARGET" in
     ;;
 esac
 
-echo ":: Fetching whisper.cpp for $TARGET"
+# ── whisper.cpp ──────────────────────────────────────────────────────────────
+echo ":: Fetching whisper.cpp ($WHISPER_ASSET) for $TARGET"
 cd "$WORK_DIR"
-if [[ "$TARGET" == *windows* ]]; then
-  curl -fL "$WHISPER_URL" -o whisper.zip
-  unzip -q whisper.zip -d whisper-extracted || { echo "unzip failed; install unzip or check zip"; exit 1; }
-  # whisper-bin-x64.zip 内主程序路径不定，按名查找
-  WHISPER_BIN="$(find whisper-extracted -name 'whisper.exe' -o -name 'main.exe' | head -1)"
+gh release download "$WHISPER_TAG" --repo ggml-org/whisper.cpp \
+  --pattern "$WHISPER_ASSET" --dir . --clobber
+
+if [[ -n "$EXT" ]]; then
+  unzip -q "$WHISPER_ASSET" -d whisper-extracted
 else
-  curl -fL "$WHISPER_URL" -o whisper.tar.gz
-  tar xzf whisper.tar.gz
-  WHISPER_BIN="$(find . -type f -name 'whisper' -o -type f -name 'main' | head -1)"
+  mkdir -p whisper-extracted && tar xzf "$WHISPER_ASSET" -C whisper-extracted
 fi
-[[ -n "$WHISPER_BIN" ]] || { echo "ERROR: whisper binary not found in archive"; exit 1; }
+
+# CLI 在归档内的 Release/（或 bin/）子目录，按名定位
+WHISPER_BIN="$(find whisper-extracted -type f -name "$WHISPER_BIN_NAME" | head -1)"
+[[ -n "$WHISPER_BIN" ]] || { echo "ERROR: $WHISPER_BIN_NAME not found in archive" >&2; exit 1; }
 cp "$WHISPER_BIN" "$BIN_DIR/whisper-$TARGET$EXT"
-chmod +x "$BIN_DIR/whisper-$TARGET$EXT" 2>/dev/null || true
+chmod +x "$BIN_DIR/whisper-$TARGET$EXT"
 
-# whisper.exe 官方 Windows 构建动态链接 ggml.dll / whisper.dll。
-# Tauri externalBin 只打包"命名的可执行文件"，伴生 DLL 不会跟着进安装包；
-# 必须把它们放进 binaries/ 并经 bundle.resources（见 release.yml TAURI_CONFIG）
-# 落到安装目录（与主程序同目录），Windows 的 DLL 搜索路径才能命中。
-if [[ "$TARGET" == *windows* ]]; then
-  WHISPER_DIR="$(dirname "$WHISPER_BIN")"
-  DLL_COUNT=0
-  for dll in "$WHISPER_DIR"/ggml*.dll "$WHISPER_DIR"/whisper*.dll; do
-    [[ -e "$dll" ]] || continue
-    cp "$dll" "$BIN_DIR/"
-    DLL_COUNT=$((DLL_COUNT + 1))
-  done
-  if [[ "$DLL_COUNT" -eq 0 ]]; then
-    echo ":: WARNING: no companion DLLs beside whisper.exe (static build?) — verify the packaged exe starts on a clean machine"
-  else
-    echo ":: Copied $DLL_COUNT companion DLL(s) for whisper.exe"
-  fi
+# 动态构建的伴生库（Windows: whisper.dll/ggml*.dll；Linux: libwhisper.so/libggml*.so）。
+# externalBin 只打包命名可执行文件；伴生库须随 bundle.resources 落到安装目录
+# （与 sidecar 同目录）才能被动态链接器命中（见 release.yml 的 TAURI_CONFIG 注入）。
+WHISPER_DIR="$(dirname "$WHISPER_BIN")"
+LIB_GLOB_WIN=("$WHISPER_DIR"/whisper*.dll "$WHISPER_DIR"/ggml*.dll)
+LIB_GLOB_LINUX=("$WHISPER_DIR"/libwhisper*.so* "$WHISPER_DIR"/libggml*.so*)
+LIB_COUNT=0
+for lib in "${LIB_GLOB_WIN[@]}" "${LIB_GLOB_LINUX[@]}"; do
+  [[ -e "$lib" ]] || continue
+  cp "$lib" "$BIN_DIR/"
+  LIB_COUNT=$((LIB_COUNT + 1))
+done
+if [[ "$LIB_COUNT" -eq 0 ]]; then
+  echo ":: WARNING: no companion libs beside whisper-cli (static build?) — verify the packaged exe starts on a clean machine"
+else
+  echo ":: Copied $LIB_COUNT companion lib(s)"
 fi
 
+# ── ffmpeg ──────────────────────────────────────────────────────────────────
 echo ":: Fetching ffmpeg for $TARGET"
 cd "$WORK_DIR"
-if [[ "$TARGET" == *windows* ]]; then
-  curl -fL "$FFMPEG_URL" -o ffmpeg.zip
-  unzip -q ffmpeg.zip -d ffmpeg-extracted
-  FFMPEG_BIN="$(find ffmpeg-extracted -name 'ffmpeg.exe' | head -1)"
+if [[ -n "$EXT" ]]; then
+  gh release download --repo "$FFMPEG_REPO" --pattern "$FFMPEG_ASSET" --dir . --clobber
+  unzip -q "$FFMPEG_ASSET" -d ffmpeg-extracted
+  FFMPEG_BIN="$(find ffmpeg-extracted -type f -name "$FFMPEG_BIN_NAME" | head -1)"
 else
   curl -fL "$FFMPEG_URL" -o ffmpeg.tar.xz
   tar xf ffmpeg.tar.xz
-  FFMPEG_BIN="$(find . -type f -name 'ffmpeg' | head -1)"
+  FFMPEG_BIN="$(find . -type f -name ffmpeg -perm -u+x | head -1)"
 fi
-[[ -n "$FFMPEG_BIN" ]] || { echo "ERROR: ffmpeg binary not found in archive"; exit 1; }
+[[ -n "$FFMPEG_BIN" ]] || { echo "ERROR: ffmpeg binary not found in archive" >&2; exit 1; }
 cp "$FFMPEG_BIN" "$BIN_DIR/ffmpeg-$TARGET$EXT"
 chmod +x "$BIN_DIR/ffmpeg-$TARGET$EXT" 2>/dev/null || true
 

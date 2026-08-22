@@ -50,15 +50,23 @@ jobs:
         shell: bash
         run: .github/scripts/fetch-sidecars.sh ${{ matrix.target }}
 
+      # 运行时注入 externalBin（dev 不需要，避免本地构建报缺二进制）。
+      # resources：whisper 的伴生动态库落到资源目录（Windows NSIS 下与主程序/sidecar
+      # 同目录，DLL 搜索路径才能命中；map+glob 语义 = 只保留文件名）。
+      # 注意：glob 在目标平台无匹配会报 GlobPathNotFound，故按 OS 分别构造。
+      - name: Build TAURI_CONFIG (per-OS sidecar injection)
+        shell: bash
+        run: |
+          if [[ "${{ matrix.target }}" == *windows* ]]; then
+            echo 'TAURI_CONFIG={"bundle":{"externalBin":["binaries/whisper","binaries/ffmpeg"],"resources":{"binaries/*.dll":"./"}}}' >> "$GITHUB_ENV"
+          else
+            echo 'TAURI_CONFIG={"bundle":{"externalBin":["binaries/whisper","binaries/ffmpeg"],"resources":{"binaries/*.so*":"./"}}}' >> "$GITHUB_ENV"
+          fi
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 运行时注入 externalBin（dev 不需要，避免本地构建报缺二进制）。
-          # tauri-action 会把此 JSON merge 进 tauri.conf.json。
-          # resources：whisper.exe 的伴生 DLL（ggml/whisper，见 fetch-sidecars.sh）
-          # 落到资源目录（Windows 安装目录 = 主程序同目录），DLL 搜索路径才能命中。
-          TAURI_CONFIG: '{"bundle":{"externalBin":["binaries/whisper","binaries/ffmpeg"],"resources":{"binaries/*.dll":"./"}}}'
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
