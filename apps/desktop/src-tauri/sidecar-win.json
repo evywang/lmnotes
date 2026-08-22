@@ -1,0 +1,6 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/whisper", "binaries/ffmpeg"],
+    "resources": { "binaries/*.dll": "./" }
+  }
+}
