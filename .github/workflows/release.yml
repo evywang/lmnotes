@@ -74,6 +74,6 @@ jobs:
           args: ${{ env.TAURI_ARGS }}
           tagName: ${{ github.ref_name }}
           releaseName: "LMNotes ${{ github.ref_name }}"
-          releaseBody: "LMNotes v0.1 — Local-first, LLM-native note app with OKF compliance."
+          releaseBody: "LMNotes v0.2 — voice input (cloud Whisper + offline whisper.cpp fallback), see release notes for details."
           releaseDraft: true
           prerelease: false
