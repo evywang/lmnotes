@@ -155,8 +155,10 @@ export function App() {
         </aside>
 
         <main class="content">
-          <Show when={activePath()} fallback={<p class="placeholder">{t("app.placeholder")}</p>}>
-            <Editor path={activePath()!} />
+          {/* keyed：路径变化即重挂载 Editor。否则 <Show> 在 truthy→truthy 切换时
+              不重挂载，Editor 的 onMount（内容加载）只跑一次，点别的文件不换内容 */}
+          <Show when={activePath()} keyed fallback={<p class="placeholder">{t("app.placeholder")}</p>}>
+            {(path) => <Editor path={path} />}
           </Show>
         </main>
 
