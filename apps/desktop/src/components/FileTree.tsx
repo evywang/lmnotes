@@ -1,5 +1,8 @@
 import { createSignal, For, Show, onMount, onCleanup, createMemo } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+// 原生对话框标题显示应用名（浏览器 alert/confirm 的标题是页面 URL，无法自定义）
+import { message, confirm as confirmDialog } from "@tauri-apps/plugin-dialog";
+import { APP_NAME, showPrompt } from "./PromptDialog";
 import { t } from "../i18n";
 
 interface FileTreeNode {
@@ -133,35 +136,36 @@ export function FileTree(props: {
   };
 
   const deleteFile = async (path: string, name: string) => {
-    if (!confirm(t("filetree.deleteConfirm", { name }))) return;
+    if (!(await confirmDialog(t("filetree.deleteConfirm", { name }), { title: APP_NAME })))
+      return;
     try {
       await invoke("delete_note", { path });
       await loadTree();
     } catch (e) {
-      alert(t("filetree.deleteFailed") + e);
+      await message(t("filetree.deleteFailed") + e, { title: APP_NAME, kind: "error" });
     }
   };
 
   const createNoteInDir = async (dir: string) => {
-    const title = window.prompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
+    const title = await showPrompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
     if (!title) return;
     try {
       const path = await invoke<string>("create_note", { title, parentDir: dir });
       props.onOpen(path);
       await loadTree();
     } catch (e) {
-      alert(t("filetree.createFailed") + e);
+      await message(t("filetree.createFailed") + e, { title: APP_NAME, kind: "error" });
     }
   };
 
   const createFolderInDir = async (dir: string) => {
-    const name = window.prompt(t("filetree.folderNamePrompt"), t("filetree.folderNameDefault"));
+    const name = await showPrompt(t("filetree.folderNamePrompt"), t("filetree.folderNameDefault"));
     if (!name) return;
     try {
       await invoke("create_folder", { parentDir: dir, name });
       await loadTree();
     } catch (e) {
-      alert(t("filetree.createFailed") + e);
+      await message(t("filetree.createFailed") + e, { title: APP_NAME, kind: "error" });
     }
   };
 
@@ -169,7 +173,7 @@ export function FileTree(props: {
     try {
       await invoke("reveal_in_explorer", { relPath: path });
     } catch (e) {
-      alert(t("filetree.openFailed") + e);
+      await message(t("filetree.openFailed") + e, { title: APP_NAME, kind: "error" });
     }
   };
 
@@ -178,14 +182,14 @@ export function FileTree(props: {
       await invoke("move_item", { srcPath, destDir });
       await loadTree();
     } catch (e) {
-      alert(t("filetree.moveFailed") + e);
+      await message(t("filetree.moveFailed") + e, { title: APP_NAME, kind: "error" });
     }
   };
 
   const moveToDialog = (srcPath: string, srcName: string) => {
     const dirs = collectDirs(tree()).map((d) => ({ path: d.path, name: d.name }));
     if (dirs.length === 0) {
-      alert(t("filetree.noMoveTarget"));
+      void message(t("filetree.noMoveTarget"), { title: APP_NAME, kind: "info" });
       return;
     }
     setMoveDialog({ srcPath, srcName, dirs });

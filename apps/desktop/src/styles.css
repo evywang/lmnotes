@@ -1150,3 +1150,45 @@ body {
 .graph-legend-count {
   margin-left: auto;
 }
+
+/* 应用名标题的文本输入对话框（替代 window.prompt） */
+.prompt-dialog {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 420px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+.prompt-titlebar {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--border);
+  user-select: none;
+}
+.prompt-message {
+  margin: 0.9rem 0.9rem 0.4rem;
+  font-size: 0.95rem;
+}
+.prompt-input {
+  width: calc(100% - 1.8rem);
+  margin: 0 0.9rem;
+  padding: 0.45rem 0.6rem;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 1rem;
+  font-family: inherit;
+}
+.prompt-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.8rem 0.9rem;
+}

@@ -20,6 +20,9 @@ export const en = {
   "app.placeholder": "Select a note on the left or search",
   "app.suggestionCenter": "Suggestion Center",
   "app.settingsTooltip": "Provider Settings (Ctrl+,)",
+  // ── Common dialogs (app-name titled) ─────────────────────────────────
+  "dialog.ok": "OK",
+  "dialog.cancel": "Cancel",
   "app.graphBtn": "🕸 Knowledge Graph (Ctrl+G)",
   "app.voiceBtn": "🎤 Voice",
   "app.voiceTooltip": "Voice input → transcript note (Ctrl+Shift+V)",

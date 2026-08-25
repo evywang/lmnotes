@@ -21,6 +21,9 @@ export const zh: Record<MessageKey, string> = {
   "app.placeholder": "选择左侧笔记或搜索",
   "app.suggestionCenter": "建议中心",
   "app.settingsTooltip": "Provider 设置 (Ctrl+,)",
+  // ── 通用对话框（应用名标题）───────────────────────────────────────────
+  "dialog.ok": "确定",
+  "dialog.cancel": "取消",
   "app.graphBtn": "🕸 知识图谱 (Ctrl+G)",
   "app.voiceBtn": "🎤 语音",
   "app.voiceTooltip": "语音输入 → 转录笔记 (Ctrl+Shift+V)",

@@ -10,6 +10,7 @@ import { VoiceCapture } from "./voice/VoiceCapture";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
+import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
 import { t } from "./i18n";
 
 export function App() {
@@ -53,7 +54,7 @@ export function App() {
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 
   const createNote = async () => {
-    const title = window.prompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
+    const title = await showPrompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
     if (!title) return;
     try {
       const path = await invoke<string>("create_note", { title });
@@ -168,6 +169,9 @@ export function App() {
       <button class="settings-btn" title={t("app.settingsTooltip")} onClick={() => setSettingsOpen(true)}>
         ⚙
       </button>
+
+      {/* 文本输入对话框宿主（应用名标题，替代 window.prompt） */}
+      <PromptDialogHost />
 
       <Show when={captureOpen()}>
         <Capture onClose={() => setCaptureOpen(false)} />
