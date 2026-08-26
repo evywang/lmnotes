@@ -87,6 +87,7 @@ cargo run -p lmnotes-cli -- --help
 | 文档 | 说明 |
 |---|---|
 | [产品需求规格 (PRD)](docs/specs/PRD.md) | 完整的产品定位、功能清单、设计决策 |
+| [功能路线图](docs/roadmap.md) | 现状盘点与后续迭代规划(v0.3~v0.5) |
 | [使用手册](docs/user-manual.md) | 界面操作、快捷键、FAQ |
 | [OKF 规范 v0.1](docs/okf/SPEC.v0.1.md) | LMNotes 遵循的开放知识格式(本地存档) |
 | [MCP Agent 接入指南](docs/mcp-agent-integration.md) | 让 Claude/Cursor 等 host 读写你的 vault |
