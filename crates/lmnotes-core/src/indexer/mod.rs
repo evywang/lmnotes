@@ -48,6 +48,7 @@ impl Indexer {
             title: concept.frontmatter.title.clone(),
             mtime: now_secs(),
             content_hash: content_hash.clone(),
+            aliases: concept.frontmatter.aliases.clone(),
         };
         // 更新 SQLite
         self.meta.upsert_concept(row).await?;

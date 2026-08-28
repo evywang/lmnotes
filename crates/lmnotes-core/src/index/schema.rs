@@ -8,10 +8,16 @@ CREATE TABLE IF NOT EXISTS concepts (
     type_       TEXT NOT NULL,
     title       TEXT,
     mtime       INTEGER NOT NULL,
-    content_hash TEXT NOT NULL
+    content_hash TEXT NOT NULL,
+    aliases     TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_concepts_path ON concepts(path);
 ";
+
+/// 老库迁移（v0.3 FR-CAP-03）：aliases 供双链补全按别名命中。
+/// 对已有列的库执行会报 duplicate column——调用方容忍并跳过。
+pub const ALTER_CONCEPTS_ALIASES: &str =
+    "ALTER TABLE concepts ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]'";
 
 /// SQLite edges 表：图谱邻接（增量，见 ADR-0003 F5）。
 pub const CREATE_EDGES: &str = "
@@ -76,6 +82,8 @@ pub struct ConceptRow {
     pub title: Option<String>,
     pub mtime: i64,
     pub content_hash: String,
+    /// 别名（frontmatter aliases，JSON 序列化存列；v0.3 补全用）。
+    pub aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,4 +92,72 @@ pub struct EdgeRow {
     pub dst_id: Option<String>,
     pub dst_path: String,
     pub link_text: Option<String>,
+}
+
+// ── 双链补全候选（FR-CAP-03，v0.3）────────────────────────────────────────
+
+/// 补全候选命中项。`matched_alias` 非空表示按别名命中（前端 label 用别名）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct NoteTitleHit {
+    pub title: String,
+    pub path: String,
+    pub id: String,
+    pub matched_alias: Option<String>,
+}
+
+/// title 回退：无 title 时用文件名（去 .md）。与 graph::title_of 语义一致。
+pub fn title_of(row: &ConceptRow) -> String {
+    row.title
+        .clone()
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| {
+            row.path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&row.path)
+                .trim_end_matches(".md")
+                .to_string()
+        })
+}
+
+/// 补全候选过滤：title / alias / path(含文件名) 大小写不敏感子串匹配。
+///
+/// `query` 为空 → 返回前 `limit` 条（rows 已按 path 排序，保持顺序）。
+/// 匹配优先级：title > alias > path/文件名（同一行只产出一条，取最高优先级来源）。
+pub fn filter_titles(rows: &[ConceptRow], query: &str, limit: usize) -> Vec<NoteTitleHit> {
+    let q = query.trim().to_lowercase();
+    let mut out = Vec::new();
+    for row in rows {
+        if out.len() >= limit {
+            break;
+        }
+        let title = title_of(row);
+        let matched_alias = row
+            .aliases
+            .iter()
+            .find(|a| q.is_empty() || a.to_lowercase().contains(&q));
+        let hit = q.is_empty()
+            || title.to_lowercase().contains(&q)
+            || matched_alias.is_some()
+            || row.path.to_lowercase().contains(&q);
+        if !hit {
+            continue;
+        }
+        // label：title 命中（或空 query）用 title；否则别名命中用别名；path 命中回退 title
+        let (label, matched_alias) = if !q.is_empty() && !title.to_lowercase().contains(&q) {
+            match matched_alias {
+                Some(a) => (a.clone(), Some(a.clone())),
+                None => (title, None),
+            }
+        } else {
+            (title, None)
+        };
+        out.push(NoteTitleHit {
+            title: label,
+            path: row.path.clone(),
+            id: row.id.clone(),
+            matched_alias,
+        });
+    }
+    out
 }

@@ -1,8 +1,8 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
 use super::schema::{
-    create_vec_sql, ConceptRow, EdgeRow, CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES,
-    CREATE_SUGGESTIONS,
+    create_vec_sql, ConceptRow, EdgeRow, ALTER_CONCEPTS_ALIASES, CREATE_CHAT_HISTORY,
+    CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -63,9 +63,15 @@ fn row_from_h(rs: &mut rusqlite::Rows<'_>) -> Result<Option<ConceptRow>> {
             title: r.get(3)?,
             mtime: r.get(4)?,
             content_hash: r.get(5)?,
+            aliases: parse_aliases(&r.get::<_, String>(6)?),
         })),
         None => Ok(None),
     }
+}
+
+/// 解析 aliases JSON 列；坏数据（非 JSON / 类型不符）容错为空表。
+fn parse_aliases(json: &str) -> Vec<String> {
+    serde_json::from_str(json).unwrap_or_default()
 }
 
 /// 把 sqlite-vec vec0 表存储的 embedding blob（小端 f32 序列）解码为 Vec<f32>。
@@ -95,15 +101,16 @@ impl IndexBackend for SqliteIndex {
     async fn upsert_concept(&self, row: ConceptRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO concepts (id, path, type_, title, mtime, content_hash)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT OR REPLACE INTO concepts (id, path, type_, title, mtime, content_hash, aliases)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![
                 row.id,
                 row.path,
                 row.type_,
                 row.title,
                 row.mtime,
-                row.content_hash
+                row.content_hash,
+                serde_json::to_string(&row.aliases).unwrap_or_else(|_| "[]".into())
             ],
         )?;
         Ok(())
@@ -138,7 +145,7 @@ impl IndexBackend for SqliteIndex {
     fn get_concept(&self, id: &str) -> Result<Option<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash FROM concepts WHERE id = ?1",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts WHERE id = ?1",
         )?;
         let mut rs = stmt.query([id])?;
         row_from_h(&mut rs)
@@ -147,7 +154,7 @@ impl IndexBackend for SqliteIndex {
     fn get_concept_by_path(&self, path: &str) -> Result<Option<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash FROM concepts WHERE path = ?1",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts WHERE path = ?1",
         )?;
         let mut rs = stmt.query([path])?;
         row_from_h(&mut rs)
@@ -194,7 +201,7 @@ impl IndexBackend for SqliteIndex {
     fn all_concepts(&self) -> Result<Vec<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash FROM concepts ORDER BY path",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts ORDER BY path",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(ConceptRow {
@@ -204,6 +211,7 @@ impl IndexBackend for SqliteIndex {
                 title: r.get(3)?,
                 mtime: r.get(4)?,
                 content_hash: r.get(5)?,
+                aliases: parse_aliases(&r.get::<_, String>(6)?),
             })
         })?;
         let mut out = Vec::new();
@@ -363,6 +371,14 @@ impl SqliteIndex {
         conn.execute_batch(&format!(
             "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}"
         ))?;
+        // 老库迁移：补 aliases 列（v0.3 FR-CAP-03）。已有该列时 ALTER 报
+        // duplicate column，容忍跳过（新库 CREATE 已含，同样会走到这里）。
+        if let Err(e) = conn.execute_batch(ALTER_CONCEPTS_ALIASES) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
         // 检测现有 vec_concepts 维度是否匹配
         let need_recreate = Self::detect_vec_dim_mismatch(&conn, dim).unwrap_or(true);
         if need_recreate {
@@ -522,7 +538,151 @@ mod tests {
             title: Some("T".into()),
             mtime: 1000,
             content_hash: "abc".into(),
+            aliases: vec![],
         }
+    }
+
+    #[tokio::test]
+    async fn aliases_round_trip_through_upsert_and_all_concepts() {
+        // v0.3 双链补全：aliases 进索引(FR-CAP-03)。写入 → 读回一致。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        let mut r = row("nt_1", "notes/ai/attention.md");
+        r.title = Some("注意力机制".into());
+        r.aliases = vec!["Attention".into(), "注意力".into()];
+        idx.upsert_concept(r).await.unwrap();
+
+        let got = idx.get_concept("nt_1").unwrap().unwrap();
+        assert_eq!(
+            got.aliases,
+            vec!["Attention".to_string(), "注意力".to_string()]
+        );
+
+        let all = idx.all_concepts().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].aliases.len(), 2);
+        assert_eq!(all[0].aliases[1], "注意力");
+    }
+
+    #[tokio::test]
+    async fn aliases_default_empty_when_null() {
+        // 老 schema 迁移后 DEFAULT '[]'：无别名记录读回应为空 vec(而非报错)。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.upsert_concept(row("nt_2", "notes/b.md")).await.unwrap();
+        let got = idx.get_concept("nt_2").unwrap().unwrap();
+        assert!(got.aliases.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migration_adds_aliases_to_legacy_schema() {
+        // 老库(无 aliases 列)升到新代码：init_schema 应补列且不丢数据。
+        let idx = SqliteIndex::in_memory().unwrap();
+        {
+            let conn = idx.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS concepts (
+                    id          TEXT PRIMARY KEY,
+                    path        TEXT NOT NULL UNIQUE,
+                    type_       TEXT NOT NULL,
+                    title       TEXT,
+                    mtime       INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL
+                );
+                INSERT INTO concepts VALUES ('nt_old', 'old.md', 'note', 'Old', 1, 'h');",
+            )
+            .unwrap();
+        }
+        idx.init_schema().await.unwrap();
+        let got = idx.get_concept("nt_old").unwrap().unwrap();
+        assert_eq!(got.title.as_deref(), Some("Old"));
+        assert!(
+            got.aliases.is_empty(),
+            "legacy row should read empty aliases"
+        );
+    }
+
+    // ── filter_titles（补全候选匹配内核，FR-CAP-03）──────────────────────
+
+    use crate::index::schema::filter_titles;
+
+    fn sample_rows() -> Vec<ConceptRow> {
+        vec![
+            ConceptRow {
+                id: "nt_1".into(),
+                path: "notes/ai/attention.md".into(),
+                type_: "note".into(),
+                title: Some("注意力机制".into()),
+                mtime: 0,
+                content_hash: "h".into(),
+                aliases: vec!["Attention".into()],
+            },
+            ConceptRow {
+                id: "nt_2".into(),
+                path: "notes/llm-wiki.md".into(),
+                type_: "note".into(),
+                title: Some("LLM Wiki".into()),
+                mtime: 0,
+                content_hash: "h".into(),
+                aliases: vec![],
+            },
+            ConceptRow {
+                id: "nt_3".into(),
+                path: "notes/daily/2026-08-26.md".into(),
+                type_: "daily".into(),
+                title: None, // 无标题 → 回退文件名
+                mtime: 0,
+                content_hash: "h".into(),
+                aliases: vec![],
+            },
+        ]
+    }
+
+    #[test]
+    fn filter_titles_empty_query_returns_first_limit() {
+        let hits = filter_titles(&sample_rows(), "", 2);
+        assert_eq!(hits.len(), 2);
+        // all_concepts 按 path 排序传入 → 保持顺序
+        assert_eq!(hits[0].path, "notes/ai/attention.md");
+    }
+
+    #[test]
+    fn filter_titles_matches_title_substring() {
+        let hits = filter_titles(&sample_rows(), "注意力", 20);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].title, "注意力机制");
+        assert!(hits[0].matched_alias.is_none());
+    }
+
+    #[test]
+    fn filter_titles_matches_alias_with_matched_alias_set() {
+        let hits = filter_titles(&sample_rows(), "atten", 20);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].matched_alias.as_deref(), Some("Attention"));
+    }
+
+    #[test]
+    fn filter_titles_is_case_insensitive_on_title() {
+        let hits = filter_titles(&sample_rows(), "llm wiki", 20);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].path, "notes/llm-wiki.md");
+    }
+
+    #[test]
+    fn filter_titles_falls_back_to_filename_and_matches_path() {
+        // 无标题笔记按文件名参与匹配
+        assert_eq!(filter_titles(&sample_rows(), "2026-08", 20).len(), 1);
+        // path 子串命中
+        let hits = filter_titles(&sample_rows(), "daily", 20);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, "nt_3");
+    }
+
+    #[test]
+    fn filter_titles_respects_limit() {
+        assert_eq!(filter_titles(&sample_rows(), "", 1).len(), 1);
+        // "o" 命中全部 3 行（attention/llm-wiki/daily 均含 o 或其文件名含 o），limit=2 截断
+        assert_eq!(filter_titles(&sample_rows(), "o", 2).len(), 2);
     }
 
     #[tokio::test]

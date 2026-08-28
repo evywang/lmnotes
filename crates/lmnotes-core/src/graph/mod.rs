@@ -240,6 +240,7 @@ mod tests {
             title: Some("Note A".into()),
             mtime: 0,
             content_hash: "h1".into(),
+            aliases: vec![],
         })
         .await
         .unwrap();
@@ -250,6 +251,7 @@ mod tests {
             title: Some("Note B".into()),
             mtime: 0,
             content_hash: "h2".into(),
+            aliases: vec![],
         })
         .await
         .unwrap();
@@ -260,6 +262,7 @@ mod tests {
             title: None, // 测试 title fallback 到 path
             mtime: 0,
             content_hash: "h3".into(),
+            aliases: vec![],
         })
         .await
         .unwrap();
