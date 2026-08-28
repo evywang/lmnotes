@@ -7,6 +7,7 @@
 
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::graph::{self, EdgeKind, GraphData};
+use lmnotes_core::index::schema::{filter_titles, NoteTitleHit};
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
 use lmnotes_core::indexer::Indexer;
@@ -34,6 +35,22 @@ pub fn search(
     engine
         .search(&query, limit.unwrap_or(20))
         .map_err(|e| e.to_string())
+}
+
+/// 双链补全候选（FR-CAP-03）：title/alias/path 子串匹配，title 命中优先。
+/// 数据源 all_concepts（内存过滤，ms 级），query 空返回前 limit 条。
+#[tauri::command]
+pub fn list_note_titles(
+    query: Option<String>,
+    limit: Option<usize>,
+    meta: State<'_, Arc<dyn IndexBackend + '_>>,
+) -> Result<Vec<NoteTitleHit>, String> {
+    let rows = meta.all_concepts().map_err(|e| e.to_string())?;
+    Ok(filter_titles(
+        &rows,
+        query.as_deref().unwrap_or(""),
+        limit.unwrap_or(20),
+    ))
 }
 
 /// 默认 vault 目录（M1a 固定 ~/.lmnotes/default）。
@@ -267,6 +284,56 @@ pub async fn rewrite_selection(
     chat.chat(req).await.map_err(|e| e.to_string())
 }
 
+/// 行动项抽取（FR-LLM-06）：从 transcript/meeting 笔记抽 markdown checklist。
+///
+/// 与 rewrite_selection 的区别：按 path 读整篇 concept，护栏读 frontmatter 的
+/// `llm_local_only`（文本可扫描，三层护栏全生效——比语音路径严格，行为正确）。
+/// 路由复用 Task::Summarize（同为"内容压缩生成"类任务，避免新增 Task 变体 +
+/// 全量 config 迁移；量大后再立专用 Task）。
+#[tauri::command]
+pub async fn extract_action_items(
+    path: String,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    let full = vault_root().join(&path);
+    let text = tokio::fs::read_to_string(&full)
+        .await
+        .map_err(|e| format!("read note failed: {e}"))?;
+    let concept = Concept::parse(&text).map_err(|e| format!("parse concept failed: {e}"))?;
+    let local_only = concept
+        .frontmatter
+        .extra
+        .get("llm_local_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let body = concept.body.clone();
+
+    let (chat, model) = registry
+        .chat_for(&routing, Task::Summarize)
+        .map_err(|e| e.to_string())?;
+    match check(&guard_cfg, chat.kind(), &body, local_only) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+    let req = ChatRequest {
+        model,
+        messages: vec![
+            ChatMessage {
+                role: ChatRole::System,
+                content: "从以下会议记录或语音转录中抽取行动项。输出 markdown 任务清单（- [ ] 格式，每条一行；若文中提及负责人或期限，用括号附在条目后）。只输出清单本身，不要任何前后解释。若确实没有行动项，输出：（无行动项）".into(),
+            },
+            ChatMessage {
+                role: ChatRole::User,
+                content: body,
+            },
+        ],
+        temperature: Some(0.2), // 抽取任务求稳
+    };
+    chat.chat(req).await.map_err(|e| e.to_string())
+}
+
 /// 保存快照（撤销用）。存到 .lmnotes/llm/snapshots/<concept_path>-<ts>.md
 #[tauri::command]
 pub async fn save_snapshot(concept_path: String, text: String) -> Result<String, String> {
@@ -283,6 +350,67 @@ pub async fn save_snapshot(concept_path: String, text: String) -> Result<String,
         .await
         .map_err(|e| e.to_string())?;
     Ok(rel)
+}
+
+/// 快照元信息（历史版本面板列表项）。
+#[derive(serde::Serialize)]
+pub struct SnapshotInfo {
+    /// 文件名尾段解析出的 unix 秒时间戳。
+    pub ts: i64,
+    /// vault 相对路径（read_snapshot 的入参）。
+    pub rel_path: String,
+    pub size_bytes: u64,
+}
+
+/// 从快照文件名解析时间戳：`{safe}-{ts}.md` 尾段数字；解析失败返回 None。
+fn parse_snapshot_ts(filename: &str) -> Option<i64> {
+    filename
+        .strip_suffix(".md")?
+        .rsplit('-')
+        .next()?
+        .parse::<i64>()
+        .ok()
+}
+
+/// 列出某 concept 的历史快照（按时间降序）。
+#[tauri::command]
+pub fn list_snapshots(concept_path: String) -> Result<Vec<SnapshotInfo>, String> {
+    let safe = concept_path.replace(['/', '\\'], "_");
+    let dir = vault_root().join(".lmnotes/llm/snapshots");
+    let mut out: Vec<SnapshotInfo> = Vec::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(out), // 目录不存在 = 无快照
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(&safe) || !name.ends_with(".md") {
+            continue;
+        }
+        let Some(ts) = parse_snapshot_ts(&name) else {
+            continue;
+        };
+        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        out.push(SnapshotInfo {
+            ts,
+            rel_path: format!(".lmnotes/llm/snapshots/{name}"),
+            size_bytes: size,
+        });
+    }
+    out.sort_by_key(|s| std::cmp::Reverse(s.ts));
+    Ok(out)
+}
+
+/// 读取快照内容。rel_path 必须位于 .lmnotes/llm/snapshots/ 内（防目录穿越）。
+#[tauri::command]
+pub async fn read_snapshot(rel_path: String) -> Result<String, String> {
+    const PREFIX: &str = ".lmnotes/llm/snapshots/";
+    if !rel_path.starts_with(PREFIX) || rel_path.contains("..") {
+        return Err(format!("invalid snapshot path: {rel_path}"));
+    }
+    tokio::fs::read_to_string(vault_root().join(&rel_path))
+        .await
+        .map_err(|e| format!("read snapshot failed: {e}"))
 }
 
 // ============ Provider 配置（T10）============
@@ -382,7 +510,7 @@ pub async fn chat_stream(
     history: Vec<HistoryMsg>,
     window: tauri::WebviewWindow,
     sqlite: State<'_, Arc<SqliteIndex>>,
-    meta: State<'_, Arc<dyn IndexBackend>>,
+    meta: State<'_, Arc<dyn IndexBackend + '_>>,
     fulltext: State<'_, Arc<TantivyIndex>>,
     registry: State<'_, Arc<Registry>>,
     routing: State<'_, Arc<Routing>>,
@@ -1577,7 +1705,23 @@ async fn download_attempt(
 
 #[cfg(test)]
 mod tests {
-    use super::pick_preferred_model;
+    use super::{parse_snapshot_ts, pick_preferred_model};
+
+    #[test]
+    fn snapshot_ts_parses_valid_suffix() {
+        assert_eq!(
+            parse_snapshot_ts("notes_a_md-1770000000.md"),
+            Some(1770000000)
+        );
+        assert_eq!(parse_snapshot_ts("x-1.md"), Some(1));
+    }
+
+    #[test]
+    fn snapshot_ts_rejects_non_numeric_or_missing_suffix() {
+        assert_eq!(parse_snapshot_ts("notes_a_md.md"), None);
+        assert_eq!(parse_snapshot_ts("notes_a_md-abc.md"), None);
+        assert_eq!(parse_snapshot_ts("notes_a_md.txt"), None);
+    }
 
     fn names(list: &[&str]) -> std::collections::HashSet<String> {
         list.iter().map(|s| s.to_string()).collect()

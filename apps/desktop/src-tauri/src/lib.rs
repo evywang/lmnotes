@@ -128,6 +128,10 @@ pub fn run() {
             while let Ok((p, is_remove)) = rx.recv() {
                 if let Ok(rel) = p.strip_prefix(&dir_consumer) {
                     let rel = rel.to_string_lossy().replace('\\', "/");
+                    // 派生数据（索引/快照）的变更不参与重建索引（v0.3：消除快照写入噪音）
+                    if rel.starts_with(".lmnotes/") {
+                        continue;
+                    }
                     if is_remove {
                         // 删除事件：尝试用路径作为 id 清除索引
                         if let Err(e) = indexer_consumer.unindex(&rel).await {
@@ -242,6 +246,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::search,
+            commands::list_note_titles,
+            commands::list_snapshots,
+            commands::read_snapshot,
+            commands::extract_action_items,
             commands::read_concept,
             commands::save_concept,
             commands::quick_capture,
