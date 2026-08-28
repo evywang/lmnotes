@@ -1,8 +1,11 @@
 import { createSignal, createMemo, onMount, Show } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { marked } from "marked";
+import { message } from "@tauri-apps/plugin-dialog";
 import { useCodeMirror } from "./solid-cm";
 import { RewriteMenu } from "./RewriteMenu";
+import { HistoryPanel } from "./HistoryPanel";
+import { APP_NAME } from "../components/PromptDialog";
 import type { EditorView } from "@codemirror/view";
 import { t } from "../i18n";
 
@@ -16,8 +19,54 @@ export function Editor(props: { path: string }) {
   const [loaded, setLoaded] = createSignal(false);
   const [dirty, setDirty] = createSignal(false);
   const [preview, setPreview] = createSignal(false);
+  const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [extracting, setExtracting] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let viewGetter = () => undefined as EditorView | undefined;
+
+  // 笔记类型（frontmatter type:）——决定是否显示「抽取行动项」（FR-LLM-06
+  // 面向会议记录/语音转录；prompt 也只为这两类设计）
+  const noteType = createMemo(() => {
+    const m = content().match(/^---\n[\s\S]*?\ntype:\s*(\S+)/);
+    return m?.[1] ?? "";
+  });
+  const canExtractActions = () =>
+    noteType() === "transcript" || noteType() === "meeting";
+
+  const saveSnapshotNow = async () => {
+    try {
+      await invoke("save_snapshot", { conceptPath: props.path, text: viewGetter()?.state.doc.toString() ?? content() });
+    } catch (e) {
+      console.error("save_snapshot failed", e);
+    }
+  };
+
+  // 行动项抽取：快照当前内容 → LLM 抽取 → checklist 追加正文尾部
+  const extractActions = async () => {
+    const view = viewGetter();
+    if (!view || extracting()) return;
+    setExtracting(true);
+    try {
+      await invoke("save_snapshot", {
+        conceptPath: props.path,
+        text: view.state.doc.toString(),
+      });
+      const result = await invoke<string>("extract_action_items", { path: props.path });
+      const insert = `\n\n## 行动项\n\n${result.trim()}\n`;
+      const end = view.state.doc.length;
+      view.dispatch({
+        changes: { from: end, insert },
+        selection: { anchor: end + insert.length },
+      });
+    } catch (e) {
+      void message(`${t("actions.extractFailed")}${e}`, {
+        title: APP_NAME,
+        kind: "error",
+      });
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   const onChange = (doc: string) => {
     setContent(doc);
@@ -79,6 +128,23 @@ export function Editor(props: { path: string }) {
         <Show when={dirty()}>
           <span class="dirty-dot">●</span>
         </Show>
+        <Show when={canExtractActions()}>
+          <button
+            class="preview-toggle"
+            disabled={extracting()}
+            onClick={extractActions}
+            title={t("editor.extractTooltip")}
+          >
+            {extracting() ? t("editor.extractBusy") : t("editor.extractActions")}
+          </button>
+        </Show>
+        <button
+          class="preview-toggle"
+          onClick={() => setHistoryOpen(true)}
+          title={t("editor.historyTooltip")}
+        >
+          🕘 {t("editor.history")}
+        </button>
         <button
           class={`preview-toggle ${preview() ? "active" : ""}`}
           onClick={() => setPreview((v) => !v)}
@@ -132,6 +198,13 @@ export function Editor(props: { path: string }) {
           }
         }}
       />
+      <Show when={historyOpen()}>
+        <HistoryPanel
+          conceptPath={props.path}
+          view={viewGetter}
+          onClose={() => setHistoryOpen(false)}
+        />
+      </Show>
     </div>
   );
 }

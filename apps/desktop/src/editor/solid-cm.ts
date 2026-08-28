@@ -3,6 +3,8 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { autocompletion } from "@codemirror/autocomplete";
+import { noteLinkCompletions } from "./linkComplete";
 
 /**
  * SolidJS 封装 CodeMirror 6。
@@ -27,6 +29,8 @@ export function useCodeMirror(
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.lineWrapping,
           markdown({ base: markdownLanguage }),
+          // 双链补全（FR-CAP-03）：`[` 触发，候选来自 vault 标题/别名
+          autocompletion({ override: [noteLinkCompletions] }),
           EditorView.theme({
             "&": { height: "100%", fontSize: "14px" },
             ".cm-scroller": { overflow: "auto" },

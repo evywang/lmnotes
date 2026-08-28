@@ -72,6 +72,24 @@ export const zh: Record<MessageKey, string> = {
   "editor.edit": "✏️ 编辑",
   "editor.preview": "👁 预览",
   "editor.loading": "加载中…",
+  "editor.history": "历史",
+  "editor.historyTooltip": "快照历史与恢复",
+  "editor.extractActions": "✅ 抽取行动项",
+  "editor.extractBusy": "抽取中…",
+  "editor.extractTooltip": "从此转录/会议笔记抽取行动项",
+
+  // ── 历史版本面板 (FR-LLM-09) ──────────────────────────────────────────
+  "history.empty": "暂无快照。每次 LLM 改写前会自动保存快照。",
+  "history.restore": "恢复此版本",
+  "history.restoring": "恢复中…",
+  "history.previewTitle": "快照 · {time}",
+  "history.close": "关闭",
+
+  // ── 行动项 (FR-LLM-06) ────────────────────────────────────────────────
+  "actions.extractFailed": "抽取失败：",
+
+  // ── 双链补全 (FR-CAP-03) ──────────────────────────────────────────────
+  "linkComplete.detail": "笔记",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "润色",

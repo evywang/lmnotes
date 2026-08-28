@@ -71,6 +71,24 @@ export const en = {
   "editor.edit": "✏️ Edit",
   "editor.preview": "👁 Preview",
   "editor.loading": "Loading…",
+  "editor.history": "History",
+  "editor.historyTooltip": "Snapshot history & restore",
+  "editor.extractActions": "✅ Extract action items",
+  "editor.extractBusy": "Extracting…",
+  "editor.extractTooltip": "Extract action items from this transcript/meeting note",
+
+  // ── History panel (FR-LLM-09) ─────────────────────────────────────────
+  "history.empty": "No snapshots yet. Snapshots are taken before each LLM rewrite.",
+  "history.restore": "Restore this version",
+  "history.restoring": "Restoring…",
+  "history.previewTitle": "Snapshot · {time}",
+  "history.close": "Close",
+
+  // ── Action items (FR-LLM-06) ──────────────────────────────────────────
+  "actions.extractFailed": "Extraction failed: ",
+
+  // ── Link completion (FR-CAP-03) ───────────────────────────────────────
+  "linkComplete.detail": "note",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "Polish",
