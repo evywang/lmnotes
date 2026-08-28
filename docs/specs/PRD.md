@@ -265,7 +265,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 |---|---|---|
 | FR-CAP-01 | 全局快捷键唤起"快速捕获"浮窗（桌面端），支持文本/语音 | MVP |
 | FR-CAP-02 | 所见即所写 Markdown 编辑器（CommonMark + GFM：表格/任务列表/脚注/数学） | MVP |
-| FR-CAP-03 | 实时双向链接补全：键入 `[](` 时按 title/alias/id 补全为目标 concept 的 OKF 路径链接 | MVP |
+| FR-CAP-03 | 实时双向链接补全：键入 `[](` 时按 title/alias/id 补全为目标 concept 的 OKF 路径链接（✅ v0.3.0 已实现：`[` 触发，title/alias/路径补全） | MVP |
 | FR-CAP-04 | 拖拽 / 粘贴 / 选择文件 添加图片、音频、视频；自动落 `assets/` 并生成对应描述 concept（§3.5） | MVP |
 | FR-CAP-05 | 语音输入：按住说话 / 流式转录，可选用本地 Whisper 或云端（✅ MVP 已实现点按录音+云端 Whisper 批量转录，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)；push-to-talk/流式/本地引擎留 P1） | MVP |
 | FR-CAP-06 | 移动端"速记"入口（下拉通知/小组件/Share Sheet 接收外部分享） | P1 |
@@ -290,10 +290,10 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-LLM-03 | **建议中心：** 统一查看/接受/拒绝/批量处理 LLM 建议；每条带溯源与 diff | MVP |
 | FR-LLM-04 | **图谱问答（Chat with Vault）：** 基于向量+图谱 RAG，回答带可点击引用 | MVP |
 | FR-LLM-05 | **就地改写：** 选中正文 → 润色/扩写/翻译/总结为要点，带撤销 | MVP |
-| FR-LLM-06 | **行动项抽取：** 从会议/语音转录抽取 TODO 并可转为任务 | P1 |
+| FR-LLM-06 | **行动项抽取：** 从会议/语音转录抽取 TODO 并可转为任务（✅ v0.3.0 已实现：checklist 追加正文；转独立任务待后续） | P1 |
 | FR-LLM-07 | **每日回顾 / 周报：** 基于时间段内的笔记自动生成 | P2 |
 | FR-LLM-08 | 所有 LLM 调用需用户可见的"是否上云"开关；含敏感关键词的条目默认仅本地模型 | MVP |
-| FR-LLM-09 | 每条 LLM 输出可回滚（保留前序版本于 `.lmnotes/llm/snapshots/`） | P1 |
+| FR-LLM-09 | 每条 LLM 输出可回滚（保留前序版本于 `.lmnotes/llm/snapshots/`）（✅ v0.3.0 已实现：历史面板浏览/恢复） | P1 |
 
 ### 5.5 搜索与连接（域：SEARCH）
 | ID | 需求 | 优先级 |

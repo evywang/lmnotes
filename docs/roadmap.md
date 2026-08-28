@@ -9,12 +9,12 @@
 
 | PRD 需求 | 优先级 | 状态 | 说明 |
 |---|---|---|---|
-| FR-CAP-03 双向链接补全 | **MVP** | ❌ 未实现 | CodeMirror 无 autocompletion 扩展 |
+| FR-CAP-03 双向链接补全 | **MVP** | ✅ v0.3.0 | `[` 触发,标题/别名/路径补全,插入 OKF 内链 |
 | FR-STORE-01 多 Vault | **MVP** | ❌ 未实现 | vault 硬编码 `~/.lmnotes/default`(`lib.rs::vault_dir`) |
 | FR-MEDIA-04 媒体任务队列 | **MVP** | ❌ 未实现 | 转录内联执行(60s 超时),无队列/重试/暂停 |
 | FR-CAP-04 拖拽/粘贴多媒体 | MVP | ⚠️ 半成品 | 只处理 `image/`;音频/视频被跳过。`insert_audio` 后端已就绪,差 UI 接线 |
-| FR-LLM-09 建议回滚 UI | P1 | ⚠️ 半成品 | 快照已落盘 `.lmnotes/llm/snapshots/`,无浏览/恢复 UI |
-| FR-LLM-06 行动项抽取 | P1 | ❌ 未实现 | |
+| FR-LLM-09 建议回滚 UI | P1 | ✅ v0.3.0 | 历史面板:列表/预览/恢复(接受建议写回仍留 M1c) |
+| FR-LLM-06 行动项抽取 | P1 | ✅ v0.3.0 | transcript/meeting 笔记一键抽取 checklist |
 | FR-MEDIA-02 图片 OCR / 视觉描述 | P1 | ❌ 未实现 | |
 | FR-CAP-08 模板系统 | P1 | ❌ 未实现 | |
 | 语音遗留(按住说话 / 流式 / 断点续传) | P1 | ❌ | 见 [ADR-0006](adr/ADR-0006-voice-transcription.md) / [ADR-0007](adr/ADR-0007-local-stt-fallback.md) 遗留清单 |
@@ -29,17 +29,15 @@
 
 ## 迭代规划(三个版本,主题化)
 
-### v0.3.0「连接」— 补齐 Wiki 核心体验 🥇 当前首选
+### v0.3.0「连接」— 补齐 Wiki 核心体验 ✅ 已实现(分支 feat/voice-input)
 
-| 功能 | 实现路径(复用度) | 量级 |
-|---|---|---|
-| **FR-CAP-03 双链补全** | CodeMirror `autocompletion` 扩展;键入 `[`(`[[` / `[](`)时查询现有 SQLite 标题索引,按 title/alias/路径补全,插入 OKF 路径链接 | M |
-| **FR-LLM-06 行动项抽取** | 语音转录的自然下游:transcript 笔记加「抽取行动项」→ 复用 `chat_for(Task::Chat)` + 护栏 → 生成 checklist 插入正文 | S |
-| **FR-LLM-09 快照恢复 UI** | Editor「历史版本」面板:列 `.lmnotes/llm/snapshots/<path>-<ts>.md`(已在落盘)+ diff 预览 + 一键恢复 | S |
+| 功能 | 实现路径(复用度) | 量级 | 状态 |
+|---|---|---|---|
+| **FR-CAP-03 双链补全** | `[` 触发 CM6 autocompletion → `list_note_titles`(aliases 已入索引)→ 插入 OKF 路径链接 | M | ✅ |
+| **FR-LLM-06 行动项抽取** | transcript/meeting 笔记工具栏按钮 → `extract_action_items`(复用 Summarize 路由 + 护栏读 `llm_local_only`)→ checklist 追加正文 | S | ✅ |
+| **FR-LLM-09 快照恢复 UI** | 「🕘 历史」面板:`list_snapshots`/`read_snapshot` + 预览 + 全文替换恢复(进 CM history 可撤销) | S | ✅ |
 
-**理由**:双链补全是「LLM Wiki」差异化体验的最大缺口;行动项抽取直接吃 v0.2 语音功能的红利;快照 UI 是改写功能的安全网。三者互相独立、不动索引层,可并行。
-
-### v0.4.0「多库与媒体」— 基础能力 + 多模态收口
+### v0.4.0「多库与媒体」— 基础能力 + 多模态收口 🥇 下一站
 
 | 功能 | 实现路径 | 量级 |
 |---|---|---|
