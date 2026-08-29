@@ -24,6 +24,16 @@ export const zh: Record<MessageKey, string> = {
   // ── 通用对话框（应用名标题）───────────────────────────────────────────
   "dialog.ok": "确定",
   "dialog.cancel": "取消",
+
+  // ── 多库管理 (FR-STORE-01) ─────────────────────────────────────────────
+  "vault.title": "库",
+  "vault.add": "添加库…",
+  "vault.remove": "移除",
+  "vault.switch": "切换",
+  "vault.removeConfirm": "把 \"{name}\" 移出库清单？（不删除任何文件）",
+  "vault.switchConfirm": "切换库并重启应用？未保存改动会自动保存（800ms 防抖）。",
+  "vault.hint": "切换会重启应用，索引、文件监听与 MCP server 将干净地重新绑定。",
+  "vault.badgeTooltip": "当前库——点击管理",
   "app.graphBtn": "🕸 知识图谱 (Ctrl+G)",
   "app.voiceBtn": "🎤 语音",
   "app.voiceTooltip": "语音输入 → 转录笔记 (Ctrl+Shift+V)",

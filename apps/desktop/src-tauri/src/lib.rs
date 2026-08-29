@@ -17,10 +17,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::Arc;
 
-/// 默认 vault 目录（M1a 固定 ~/.lmnotes/default；UI 选择器 M1b+）。
+/// 当前 vault 目录（v0.4 多库：与 commands::vault_root 同源，见 llm_config::current_vault）。
 fn vault_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lmnotes").join("default")
+    llm_config::current_vault()
 }
 
 /// 保活的 watcher（持有以避免被 drop）。
@@ -277,6 +276,10 @@ pub fn run() {
             commands::move_item,
             commands::graph_full,
             commands::graph_neighborhood,
+            commands::list_vaults,
+            commands::add_vault,
+            commands::remove_vault,
+            commands::switch_vault,
             commands::list_whisper_models,
             commands::download_whisper_model,
             commands::get_local_stt_status

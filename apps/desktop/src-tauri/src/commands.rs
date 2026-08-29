@@ -17,7 +17,7 @@ use lmnotes_core::llm::suggestion::{SuggestionRecord, SuggestionStatus};
 use lmnotes_core::llm::{ChatMessage, ChatRequest, ChatRole};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -53,10 +53,9 @@ pub fn list_note_titles(
     ))
 }
 
-/// 默认 vault 目录（M1a 固定 ~/.lmnotes/default）。
+/// 当前 vault 目录（v0.4 多库：config.last_vault → 回退 ~/.lmnotes/default，进程内缓存）。
 fn vault_root() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    home.join(".lmnotes").join("default")
+    crate::llm_config::current_vault()
 }
 
 /// LMNotes 配置主目录 ~/.lmnotes（与 config.json / mcp.json 同级）。
@@ -1489,6 +1488,107 @@ fn pick_preferred_model(names: &std::collections::HashSet<String>) -> Option<Str
     let mut sorted: Vec<&String> = names.iter().collect();
     sorted.sort();
     sorted.into_iter().next().cloned()
+}
+
+// ============ 多 Vault 管理（FR-STORE-01，v0.4）============
+
+/// vault 清单条目。
+#[derive(serde::Serialize)]
+pub struct VaultInfo {
+    /// 绝对路径。
+    pub path: String,
+    /// 展示名（目录名）。
+    pub name: String,
+    /// 是否当前库。
+    pub current: bool,
+}
+
+/// 列出已登记的 vault（标记当前库）。
+#[tauri::command]
+pub fn list_vaults() -> Vec<VaultInfo> {
+    let cfg = crate::llm_config::Config::load_or_default();
+    let cur = vault_root();
+    let mut seen = false;
+    let out: Vec<VaultInfo> = cfg
+        .vaults
+        .iter()
+        .map(|p| {
+            let pb = PathBuf::from(p);
+            let is_cur = pb == cur;
+            if is_cur {
+                seen = true;
+            }
+            VaultInfo {
+                path: p.clone(),
+                name: pb
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| p.clone()),
+                current: is_cur,
+            }
+        })
+        .collect();
+    // 当前库不在清单（如默认库未登记）→ 兜底补一条，UI 永远能看到当前库
+    if !seen {
+        let mut out = out;
+        let cur_s = cur.to_string_lossy().into_owned();
+        out.push(VaultInfo {
+            name: cur
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| cur_s.clone()),
+            path: cur_s,
+            current: true,
+        });
+        out
+    } else {
+        out
+    }
+}
+
+/// 登记一个 vault 目录（须已存在）。
+#[tauri::command]
+pub fn add_vault(path: String) -> Result<(), String> {
+    let pb = PathBuf::from(&path);
+    if !pb.is_dir() {
+        return Err(format!("not a directory: {path}"));
+    }
+    let mut cfg = crate::llm_config::Config::load_or_default();
+    if cfg.vaults.iter().any(|v| v == &path) {
+        return Ok(()); // 幂等
+    }
+    cfg.vaults.push(path);
+    cfg.save()
+}
+
+/// 移出一个 vault（仅出清单，不删数据；不可移出当前库）。
+#[tauri::command]
+pub fn remove_vault(path: String) -> Result<(), String> {
+    if Path::new(&path) == vault_root() {
+        return Err("cannot remove the current vault".into());
+    }
+    let mut cfg = crate::llm_config::Config::load_or_default();
+    cfg.vaults.retain(|v| v != &path);
+    if cfg.last_vault.as_deref() == Some(path.as_str()) {
+        cfg.last_vault = None;
+    }
+    cfg.save()
+}
+
+/// 切换 vault：写 last_vault 后重启应用（重启式切换，ADR-0008——
+/// 热切换需重建 indexer/engine/watcher/MCP 五组状态，侵入面大）。
+#[tauri::command]
+pub async fn switch_vault(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let mut cfg = crate::llm_config::Config::load_or_default();
+    if !cfg.vaults.iter().any(|v| v == &path) {
+        return Err(format!("vault not registered: {path}"));
+    }
+    if !PathBuf::from(&path).is_dir() {
+        return Err(format!("vault directory missing: {path}"));
+    }
+    cfg.last_vault = Some(path);
+    cfg.save()?;
+    app.restart(); // -> !，不会返回
 }
 
 /// 探测本地 STT 就绪状态（前端开语音浮窗前调用，决定是否需下载模型）。

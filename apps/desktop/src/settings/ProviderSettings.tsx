@@ -2,6 +2,7 @@ import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t, locale, setLocale } from "../i18n";
 import { LocalSttSetup } from "../voice/LocalSttSetup";
+import { VaultSection } from "./VaultSection";
 
 interface ProviderRefSer {
   provider: string;
@@ -99,6 +100,8 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   </div>
                 </div>
               </div>
+
+              <VaultSection />
 
               <For each={cfg().providers}>
                 {(p, i) => (

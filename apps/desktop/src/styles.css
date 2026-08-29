@@ -1273,3 +1273,51 @@ body {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* 多库管理（FR-STORE-01） */
+.vault-section {
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+  margin-top: 0.8rem;
+}
+.vault-list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.vault-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.vault-item.current {
+  border-color: var(--accent);
+}
+.vault-name {
+  font-weight: 600;
+}
+.vault-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vault-badge {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  text-align: left;
+}
+.vault-badge:hover {
+  border-color: var(--accent);
+}

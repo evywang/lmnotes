@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup } from "solid-js";
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
@@ -12,6 +12,26 @@ import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
 import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
 import { t } from "./i18n";
+
+/** 侧栏当前库指示（v0.4 多库）：显示库名，点击打开设置切换。 */
+function VaultBadge(props: { onOpenSettings: () => void }) {
+  const [name, setName] = createSignal<string | null>(null);
+  onMount(async () => {
+    try {
+      const vs = await invoke<{ name: string; current: boolean }[]>("list_vaults");
+      setName(vs.find((v) => v.current)?.name ?? null);
+    } catch {
+      // 静默：指示器失败不打扰
+    }
+  });
+  return (
+    <Show when={name()}>
+      <button class="vault-badge" title={t("vault.badgeTooltip")} onClick={props.onOpenSettings}>
+        📚 {name()}
+      </button>
+    </Show>
+  );
+}
 
 export function App() {
   const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
@@ -110,6 +130,7 @@ export function App() {
               {t("app.voiceBtn")}
             </button>
           </div>
+          <VaultBadge onOpenSettings={() => setSettingsOpen(true)} />
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
             {t("app.chatBtn")}
           </button>

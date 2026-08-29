@@ -18,6 +18,44 @@ pub struct Config {
     /// MCP server 配置（暴露笔记给 AI agent）。向后兼容：旧 config.json 无此段时取默认。
     #[serde(default)]
     pub mcp: McpConfig,
+    /// 已登记的 vault 目录（绝对路径）。v0.4 多库（FR-STORE-01）；旧 config 无此段取默认单库。
+    #[serde(default = "default_vaults")]
+    pub vaults: Vec<String>,
+    /// 启动时打开的 vault。None / 失效路径 → 回退默认库 ~/.lmnotes/default。
+    #[serde(default)]
+    pub last_vault: Option<String>,
+}
+
+/// 默认 vault 路径（M1a 以来的固定值）。
+pub fn default_vault_path() -> std::path::PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    home.join(".lmnotes").join("default")
+}
+
+fn default_vaults() -> Vec<String> {
+    vec![default_vault_path().to_string_lossy().into_owned()]
+}
+
+/// 纯函数：解析当前 vault（可测）。last_vault 存在且是目录 → 用之；否则默认库。
+pub fn resolve_vault(last_vault: Option<&str>, default: &std::path::Path) -> std::path::PathBuf {
+    match last_vault {
+        Some(p) if !p.trim().is_empty() && std::path::Path::new(p).is_dir() => {
+            std::path::PathBuf::from(p)
+        }
+        _ => default.to_path_buf(),
+    }
+}
+
+/// 进程内当前 vault（重启式切换 → 进程内不变，OnceLock 缓存）。
+/// 供 commands::vault_root / lib::vault_dir 收口委托。
+pub fn current_vault() -> std::path::PathBuf {
+    static VAULT: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    VAULT
+        .get_or_init(|| {
+            let cfg = Config::load_or_default();
+            resolve_vault(cfg.last_vault.as_deref(), &default_vault_path())
+        })
+        .clone()
 }
 
 /// MCP server（暴露 vault 给 AI agent）的配置。
@@ -180,6 +218,8 @@ impl Default for Config {
             },
             guard: GuardConfigSer::default(),
             mcp: McpConfig::default(),
+            vaults: default_vaults(),
+            last_vault: None,
         }
     }
 }
@@ -517,6 +557,8 @@ mod tests {
                 ..Default::default()
             },
             mcp: McpConfig::default(),
+            vaults: default_vaults(),
+            last_vault: None,
         }
     }
 
@@ -721,5 +763,43 @@ mod tests {
             .model_path()
             .to_string_lossy()
             .ends_with("ggml-medium.bin"));
+    }
+    // ── 多 Vault（FR-STORE-01，v0.4）────────────────────────────────────
+
+    #[test]
+    fn legacy_config_without_vault_fields_parses() {
+        // 旧 config.json（v0.3 前无 vaults/last_vault）应能解析且 vaults 回退默认单库。
+        let json = r#"{
+            "providers": [{"type":"ollama","base_url":"http://localhost:11434","chat_model":"m","embed_model":"e"}],
+            "routing": {},
+            "guard": {"cloud_allowed": false, "sensitive_patterns": []}
+        }"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.vaults.len(), 1);
+        assert!(cfg.vaults[0]
+            .replace('\\', "/")
+            .ends_with(".lmnotes/default"));
+        assert!(cfg.last_vault.is_none());
+    }
+
+    #[test]
+    fn resolve_vault_falls_back_when_missing_or_invalid() {
+        let default = std::path::Path::new("/home/u/.lmnotes/default");
+        // None → 默认
+        assert_eq!(resolve_vault(None, default), default);
+        // 指向不存在目录 → 默认
+        assert_eq!(resolve_vault(Some("/nonexistent/vault"), default), default);
+        // 空串 → 默认
+        assert_eq!(resolve_vault(Some("  "), default), default);
+    }
+
+    #[test]
+    fn resolve_vault_uses_valid_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().to_str().unwrap().to_string();
+        assert_eq!(
+            resolve_vault(Some(&p), std::path::Path::new("/default")),
+            std::path::PathBuf::from(&p)
+        );
     }
 }

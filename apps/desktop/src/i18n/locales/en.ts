@@ -23,6 +23,16 @@ export const en = {
   // ── Common dialogs (app-name titled) ─────────────────────────────────
   "dialog.ok": "OK",
   "dialog.cancel": "Cancel",
+
+  // ── Vault management (FR-STORE-01) ────────────────────────────────────
+  "vault.title": "Vaults",
+  "vault.add": "Add vault…",
+  "vault.remove": "Remove",
+  "vault.switch": "Switch",
+  "vault.removeConfirm": "Remove \"{name}\" from the vault list? (files are NOT deleted)",
+  "vault.switchConfirm": "Switch vault and restart the app? Unsaved edits are auto-saved (800ms debounce).",
+  "vault.hint": "Switching restarts the app so the index, watcher and MCP server rebind cleanly.",
+  "vault.badgeTooltip": "Current vault — click to manage",
   "app.graphBtn": "🕸 Knowledge Graph (Ctrl+G)",
   "app.voiceBtn": "🎤 Voice",
   "app.voiceTooltip": "Voice input → transcript note (Ctrl+Shift+V)",
