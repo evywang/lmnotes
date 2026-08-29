@@ -11,7 +11,7 @@ interface ProviderRefSer {
 
 interface Config {
   providers: Array<
-    | { type: "ollama"; base_url: string; chat_model: string; embed_model: string }
+    | { type: "ollama"; base_url: string; chat_model: string; embed_model: string; vision_model?: string }
     | {
         type: "openai";
         id: string;
@@ -20,6 +20,7 @@ interface Config {
         chat_model: string;
         embed_model: string;
         transcribe_model?: string;
+        vision_model?: string;
       }
   >;
   routing: {
@@ -145,6 +146,23 @@ export function ProviderSettings(props: { onClose: () => void }) {
                         onInput={(e) => {
                           const next = [...cfg().providers];
                           next[i()] = { ...p, chat_model: e.currentTarget.value } as typeof p;
+                          setConfig({ ...cfg(), providers: next });
+                        }}
+                      />
+                    </label>
+                    <label>
+                      {t("settings.visionModel")}
+                      <input
+                        type="text"
+                        value={(p as { vision_model?: string }).vision_model ?? ""}
+                        placeholder={t("settings.visionModelPlaceholder")}
+                        onInput={(e) => {
+                          const next = [...cfg().providers];
+                          const v = e.currentTarget.value.trim();
+                          next[i()] = {
+                            ...p,
+                            vision_model: v === "" ? undefined : v,
+                          } as typeof p;
                           setConfig({ ...cfg(), providers: next });
                         }}
                       />

@@ -122,6 +122,8 @@ export const zh: Record<MessageKey, string> = {
   "settings.cloudAllowed": "允许云端 Provider（默认关闭，本地优先）",
   "settings.transcribeModel": "转录模型（可选）",
   "settings.transcribeModelPlaceholder": "如 whisper-1（填后启用语音输入）",
+  "settings.visionModel": "视觉模型（可选）",
+  "settings.visionModelPlaceholder": "如 gpt-4o-mini / llava（粘贴图片自动生成描述）",
   "settings.saving": "保存中…",
   "settings.save": "保存",
   "settings.cancel": "取消",

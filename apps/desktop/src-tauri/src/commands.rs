@@ -879,6 +879,150 @@ pub async fn create_voice_note(
     .await
 }
 
+/// 图片描述（FR-MEDIA-02）：已归档图片 → 视觉 LLM 描述/OCR → image-desc concept。
+///
+/// 护栏：图片 bytes 不可字符串扫描，同语音先例——仅 cloud_allowed 门控。
+/// 产物 `type: image-desc`，resource 指原图，存 descriptions/（PRD §3.5）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn describe_image(
+    asset_rel: String,
+    indexer: State<'_, Arc<Indexer>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    use lmnotes_core::id::new_resource_id;
+    use lmnotes_core::llm::provider::{ImageInput, DEFAULT_VISION_PROMPT};
+    use lmnotes_core::okf::concept::Concept;
+    use lmnotes_core::okf::frontmatter::Frontmatter;
+
+    // 1) 读原图（限 assets/ 内，防穿越）
+    let rel = asset_rel.trim_start_matches('/');
+    if !rel.starts_with("assets/") || rel.contains("..") {
+        return Err(format!("invalid asset path: {asset_rel}"));
+    }
+    let full = vault_root().join(rel);
+    let bytes = tokio::fs::read(&full)
+        .await
+        .map_err(|e| format!("read image failed: {e}"))?;
+    let mime = mime_from_ext(rel.rsplit('.').next().unwrap_or(""));
+
+    // 2) 取 vision provider + 护栏
+    let (vision, model) = registry
+        .vision_for(&routing, Task::Vision)
+        .map_err(|e| e.to_string())?;
+    match check(&guard_cfg, vision.kind(), "", false) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+    let provider_id = vision.id().to_string();
+
+    // 3) 描述（默认提示词含图中文字转写）
+    let desc = vision
+        .describe(
+            ImageInput {
+                bytes,
+                mime: mime.clone(),
+            },
+            &model,
+            Some(DEFAULT_VISION_PROMPT),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 4) image-desc concept → descriptions/
+    let now = chrono::Utc::now();
+    let hash8 = rel
+        .rsplit('/')
+        .next()
+        .and_then(|f| f.split('.').next())
+        .unwrap_or("img")
+        .chars()
+        .take(8)
+        .collect::<String>();
+    let title = format!("Image {hash8}");
+    let mut extra = std::collections::BTreeMap::new();
+    extra.insert("mime".into(), serde_yaml::Value::String(mime));
+    extra.insert(
+        "described_by".into(),
+        serde_yaml::Value::String(format!("{model}@{provider_id}")),
+    );
+    let fm = Frontmatter {
+        type_: "image-desc".into(),
+        title: Some(title.clone()),
+        description: None,
+        resource: Some(format!("/{rel}")),
+        tags: vec!["image-desc".into()],
+        timestamp: Some(now),
+        id: Some(new_resource_id("imgdesc")),
+        aliases: vec![],
+        status: None,
+        language: None,
+        created: Some(now),
+        extra,
+    };
+    let body = format!(
+        "# {title}
+
+{desc}
+
+![{title}](/{rel})
+"
+    );
+    let concept = Concept {
+        frontmatter: fm,
+        body,
+    };
+    let text = concept.to_string();
+    let path = format!("descriptions/img-{hash8}-{}.md", now.format("%Y%m%d"));
+    let out = vault_root().join(&path);
+    if let Some(pp) = out.parent() {
+        tokio::fs::create_dir_all(pp)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&out, &text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // 5) 索引 + 建议（与 transcript 一致）
+    if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
+        eprintln!("image-desc index fail {path}: {e}");
+    }
+    let sqlite_c = sqlite.inner().clone();
+    let reg_c = registry.inner().clone();
+    let routing_c = routing.inner().clone();
+    let guard_c = guard_cfg.inner().clone();
+    let path_c = path.clone();
+    let text_c = text.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = lmnotes_core::indexer::generate_suggestions(
+            &concept, &path_c, &sqlite_c, &reg_c, &routing_c, &guard_c, &text_c,
+        )
+        .await
+        {
+            eprintln!("image-desc suggestion fail {path_c}: {e}");
+        }
+    });
+    Ok(path)
+}
+
+/// 扩展名 → mime（图片归档的有限集合）。
+fn mime_from_ext(ext: &str) -> String {
+    match ext.to_ascii_lowercase().as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
 /// 媒体文件转转录笔记（FR-CAP-04）：拖拽/粘贴的音频或视频文件。
 /// 音频：归档后直接转录（与 voice 同路径）。
 /// 视频：归档到 assets/video/ → ffmpeg sidecar 抽 16kHz mono 音轨（-vn）→ 转录。

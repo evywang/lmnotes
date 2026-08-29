@@ -256,6 +256,7 @@ pub fn run() {
             commands::insert_audio,
             commands::create_voice_note,
             commands::create_media_note,
+            commands::describe_image,
             commands::list_suggestions,
             commands::accept_suggestion,
             commands::reject_suggestion,

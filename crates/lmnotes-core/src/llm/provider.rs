@@ -16,6 +16,7 @@ bitflags::bitflags! {
         const CHAT = 1 << 0;
         const EMBED = 1 << 1;
         const TRANSCRIBE = 1 << 2;
+        const VISION = 1 << 3;
     }
 }
 
@@ -98,3 +99,25 @@ pub trait TranscribeCap: LlmProvider {
         language: Option<&str>,
     ) -> Result<Transcript>;
 }
+
+/// 视觉描述输入（单图，OCR 由通用视觉模型顺带覆盖——不做专用管线）。
+#[derive(Debug, Clone)]
+pub struct ImageInput {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+}
+
+/// 视觉描述能力 trait（ADR-0005 §1 预留位，v0.4 FR-MEDIA-02 落地）。
+#[async_trait]
+pub trait VisionCap: LlmProvider {
+    /// 描述图片。`prompt` 为 None 时用实现方默认提示词。
+    async fn describe(
+        &self,
+        image: ImageInput,
+        model: &str,
+        prompt: Option<&str>,
+    ) -> Result<String>;
+}
+
+/// 视觉描述默认提示词（含图中文字转写，覆盖 OCR 场景）。
+pub const DEFAULT_VISION_PROMPT: &str = "用中文详细描述这张图片的内容；若图中含有文字，先逐字转写（保留原文语言），再描述版面与图表结构。";

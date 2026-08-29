@@ -13,6 +13,7 @@ pulldown-cmark = "0.13"
 sha2 = "0.10"
 async-trait = "0.1"
 hex = "0.4"
+base64 = "0.22"
 rusqlite = { workspace = true }
 sqlite-vec = { workspace = true }
 tantivy = { workspace = true }

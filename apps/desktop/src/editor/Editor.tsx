@@ -133,6 +133,10 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
             changes: { from: sel.from, insert: `![${f.name}](${rel})\n` },
           });
         }
+        // FR-MEDIA-02：后台生成图片描述（image-desc 笔记）。未配视觉模型时静默跳过。
+        invoke<string>("describe_image", { assetRel: rel })
+          .then((descPath) => console.log("image described →", descPath))
+          .catch(() => {/* 未配视觉 provider 或被护栏拒——不打扰 */});
       } catch (e) {
         console.error("insert_image failed", e);
       }

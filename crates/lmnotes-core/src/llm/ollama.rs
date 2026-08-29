@@ -171,9 +171,97 @@ impl EmbedCap for OllamaProvider {
     }
 }
 
+// ── VisionCap（FR-MEDIA-02）：Ollama 原生 images 字段（llava / llama3.2-vision）──
+#[derive(Serialize)]
+struct OllamaVisionBody {
+    model: String,
+    messages: Vec<OllamaVisionMsg>,
+    stream: bool,
+}
+#[derive(Serialize)]
+struct OllamaVisionMsg {
+    role: String,
+    content: String,
+    images: Vec<String>,
+}
+#[derive(Deserialize)]
+struct OllamaVisionResp {
+    message: OllamaVisionReply,
+}
+#[derive(Deserialize)]
+struct OllamaVisionReply {
+    content: String,
+}
+
+#[async_trait]
+impl VisionCap for OllamaProvider {
+    async fn describe(
+        &self,
+        image: ImageInput,
+        model: &str,
+        prompt: Option<&str>,
+    ) -> Result<String> {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
+        let url = format!("{}/api/chat", self.base_url);
+        let body = OllamaVisionBody {
+            model: model.into(),
+            messages: vec![OllamaVisionMsg {
+                role: "user".into(),
+                content: prompt.unwrap_or(DEFAULT_VISION_PROMPT).into(),
+                images: vec![b64],
+            }],
+            stream: false,
+        };
+        let resp = self.client.post(&url).json(&body).send().await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            return Err(crate::CoreError::Conformance(format!(
+                "ollama vision HTTP {status}: {}",
+                text.chars().take(400).collect::<String>()
+            )));
+        }
+        let r: OllamaVisionResp = serde_json::from_str(&text)
+            .map_err(|e| crate::CoreError::Conformance(format!("ollama vision decode: {e}")))?;
+        Ok(r.message.content)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn vision_describe_sends_native_images_field() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .and(body_partial_json(serde_json::json!({
+                "messages": [{ "role": "user", "images": ["AQID"] }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": { "content": "截图：设置界面" }
+            })))
+            .mount(&server)
+            .await;
+        let p = OllamaProvider::new(server.uri());
+        let out = p
+            .describe(
+                ImageInput {
+                    bytes: vec![1, 2, 3],
+                    mime: "image/png".into(),
+                },
+                "llava",
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(out, "截图：设置界面");
+    }
+
     #[test]
     fn default_is_local_with_both_caps() {
         let p = OllamaProvider::default_local();

@@ -121,6 +121,8 @@ export const en = {
   "settings.cloudAllowed": "Allow cloud providers (off by default, local first)",
   "settings.transcribeModel": "Transcribe Model (optional)",
   "settings.transcribeModelPlaceholder": "e.g. whisper-1 (enables voice input)",
+  "settings.visionModel": "Vision Model (optional)",
+  "settings.visionModelPlaceholder": "e.g. gpt-4o-mini / llava (describes pasted images)",
   "settings.saving": "Saving…",
   "settings.save": "Save",
   "settings.cancel": "Cancel",

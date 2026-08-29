@@ -13,6 +13,7 @@ pub enum Task {
     Chat,
     Rewrite,
     Transcribe,
+    Vision,
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,7 @@ pub struct Registry {
     chats: HashMap<String, Arc<dyn ChatCap>>,
     embeds: HashMap<String, Arc<dyn EmbedCap>>,
     transcribes: HashMap<String, Arc<dyn TranscribeCap>>,
+    visions: HashMap<String, Arc<dyn VisionCap>>,
 }
 
 impl Registry {
@@ -43,6 +45,7 @@ impl Registry {
             chats: HashMap::new(),
             embeds: HashMap::new(),
             transcribes: HashMap::new(),
+            visions: HashMap::new(),
         }
     }
 
@@ -177,6 +180,46 @@ impl Registry {
                     .map(|p| (p.clone(), pref.model.clone()))
             })
             .collect()
+    }
+
+    /// 注册一个 vision provider。
+    pub fn register_vision<P>(&mut self, p: P)
+    where
+        P: LlmProvider + VisionCap + 'static,
+    {
+        let arc = Arc::new(p);
+        self.register_vision_arc(arc);
+    }
+
+    /// 注册一个已有 Arc 的 vision provider（同实例多能力共用）。
+    pub fn register_vision_arc<P>(&mut self, arc: Arc<P>)
+    where
+        P: LlmProvider + VisionCap + 'static,
+    {
+        let id = arc.id().to_string();
+        self.visions.insert(id.clone(), arc.clone());
+        self.providers.insert(id, arc);
+    }
+
+    /// 按任务取 vision provider（首选 → 降级备选）。
+    pub fn vision_for(
+        &self,
+        routing: &Routing,
+        task: Task,
+    ) -> Result<(Arc<dyn VisionCap>, String)> {
+        let (primary, fallbacks) = routing.map.get(&task).ok_or_else(|| {
+            crate::CoreError::Conformance(format!("no routing for task {task:?}"))
+        })?;
+        for pref in std::iter::once(primary).chain(fallbacks.iter()) {
+            if let Some(p) = self.visions.get(&pref.provider_id) {
+                return Ok((p.clone(), pref.model.clone()));
+            }
+        }
+        Err(crate::CoreError::Conformance(format!(
+            "no vision provider for task {task:?} (tried {} + {} fallbacks)",
+            primary.provider_id,
+            fallbacks.len()
+        )))
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn LlmProvider>> {

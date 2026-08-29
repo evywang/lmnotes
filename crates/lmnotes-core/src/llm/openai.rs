@@ -215,6 +215,97 @@ impl EmbedCap for OpenAiProvider {
     }
 }
 
+// ── VisionCap（FR-MEDIA-02，v0.4）───────────────────────────────────────
+/// OpenAI 兼容视觉：chat/completions 的 content 用多部件
+/// [{type:"text"},{type:"image_url",image_url:{url:"data:{mime};base64,..."}}]。
+/// 非流式响应 choices[0].message.content。
+#[derive(Serialize)]
+struct VisionBody {
+    model: String,
+    messages: Vec<VisionMsg>,
+    max_tokens: u32,
+}
+#[derive(Serialize)]
+struct VisionMsg {
+    role: String,
+    content: Vec<VisionPart>,
+}
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum VisionPart {
+    Text { text: String },
+    ImageUrl { image_url: VisionUrl },
+}
+#[derive(Serialize)]
+struct VisionUrl {
+    url: String,
+}
+#[derive(Deserialize)]
+struct VisionResp {
+    choices: Vec<VisionChoice>,
+}
+#[derive(Deserialize)]
+struct VisionChoice {
+    message: VisionMessageDe,
+}
+#[derive(Deserialize)]
+struct VisionMessageDe {
+    content: String,
+}
+
+#[async_trait]
+impl VisionCap for OpenAiProvider {
+    async fn describe(
+        &self,
+        image: ImageInput,
+        model: &str,
+        prompt: Option<&str>,
+    ) -> Result<String> {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&image.bytes);
+        let url = format!("{}/chat/completions", self.base_url);
+        let body = VisionBody {
+            model: model.into(),
+            messages: vec![VisionMsg {
+                role: "user".into(),
+                content: vec![
+                    VisionPart::Text {
+                        text: prompt.unwrap_or(DEFAULT_VISION_PROMPT).into(),
+                    },
+                    VisionPart::ImageUrl {
+                        image_url: VisionUrl {
+                            url: format!("data:{};base64,{}", image.mime, b64),
+                        },
+                    },
+                ],
+            }],
+            max_tokens: 1024,
+        };
+        let resp = self
+            .client
+            .post(&url)
+            .bearer_auth(&self.api_key)
+            .json(&body)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await?;
+        if !status.is_success() {
+            return Err(crate::CoreError::Conformance(format!(
+                "vision HTTP {status}: {}",
+                text.chars().take(400).collect::<String>()
+            )));
+        }
+        let r: VisionResp = serde_json::from_str(&text)
+            .map_err(|e| crate::CoreError::Conformance(format!("vision decode: {e}")))?;
+        Ok(r.choices
+            .into_iter()
+            .next()
+            .map(|c| c.message.content)
+            .unwrap_or_default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,6 +340,38 @@ mod tests {
             out.push_str(&c.unwrap());
         }
         assert_eq!(out, "Hi there");
+    }
+
+    #[tokio::test]
+    async fn vision_describe_sends_image_part_and_parses_reply() {
+        use wiremock::matchers::{body_partial_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/chat/completions"))
+            .and(body_partial_json(serde_json::json!({
+                "messages": [{ "role": "user",
+                  "content": [ { "type": "text" },
+                               { "type": "image_url", "image_url": { "url": "data:image/png;base64,AQID" } } ] }]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "choices": [{ "message": { "content": "一张图表：柱状图…" } }]
+            })))
+            .mount(&server)
+            .await;
+        let p = OpenAiProvider::new("test", server.uri(), "k");
+        let out = p
+            .describe(
+                ImageInput {
+                    bytes: vec![1, 2, 3],
+                    mime: "image/png".into(),
+                },
+                "gpt-4o-mini",
+                Some("describe"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(out, "一张图表：柱状图…");
     }
 
     #[test]

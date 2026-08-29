@@ -100,6 +100,9 @@ pub enum ProviderConfig {
         embed_model: String,
         #[serde(default = "default_ollama_dim")]
         embed_dim: usize,
+        /// 视觉模型（llava / llama3.2-vision 等）。None = 不启用视觉描述。
+        #[serde(default)]
+        vision_model: Option<String>,
     },
     #[serde(rename = "openai")]
     OpenAi {
@@ -114,6 +117,9 @@ pub enum ProviderConfig {
         /// 仅 OpenAI 兼容端点支持；Ollama 不支持转录。
         #[serde(default)]
         transcribe_model: Option<String>,
+        /// 视觉模型（gpt-4o-mini / GLM-4V 等）。None = 不启用。
+        #[serde(default)]
+        vision_model: Option<String>,
     },
     /// 本地 whisper.cpp（ADR-0007）。云端不可用时的降级 provider。
     /// id 固定 "whisper-cpp"。binary/ffmpeg 路径缺省走 sidecar 解析（commands::resolve_sidecar）。
@@ -167,6 +173,9 @@ pub struct RoutingConfig {
     /// 语音转录任务路由（FR-CAP-05）。None 表示不启用转录。
     #[serde(default)]
     pub transcribe: Option<ProviderRefSer>,
+    /// 视觉描述任务路由（FR-MEDIA-02，v0.4）。None 时从 vision_model 自动派生。
+    #[serde(default)]
+    pub vision: Option<ProviderRefSer>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +200,7 @@ impl Default for Config {
                 chat_model: "qwen2.5:7b".into(),
                 embed_model: "nomic-embed-text".into(),
                 embed_dim: 768,
+                vision_model: None,
             }],
             routing: RoutingConfig {
                 summarize: Some(ProviderRefSer {
@@ -215,6 +225,7 @@ impl Default for Config {
                 }),
                 // 默认全本地：无转录 provider（需用户显式配云端 + transcribe_model）。
                 transcribe: None,
+                vision: None,
             },
             guard: GuardConfigSer::default(),
             mcp: McpConfig::default(),
@@ -286,21 +297,31 @@ impl Config {
         let mut effective_local_model: Option<String> = None;
         for p in &self.providers {
             match p {
-                ProviderConfig::Ollama { base_url, .. } => {
+                ProviderConfig::Ollama {
+                    base_url,
+                    vision_model,
+                    ..
+                } => {
                     let ollama = std::sync::Arc::new(OllamaProvider::new(base_url));
                     reg.register_chat_arc(ollama.clone());
-                    reg.register_embed_arc(ollama);
+                    reg.register_embed_arc(ollama.clone());
+                    if vision_model.is_some() {
+                        reg.register_vision_arc(ollama);
+                    }
                 }
                 ProviderConfig::OpenAi {
                     id,
                     base_url,
                     api_key,
-                    transcribe_model: _,
+                    vision_model,
                     ..
                 } => {
                     let openai = std::sync::Arc::new(OpenAiProvider::new(id, base_url, api_key));
                     reg.register_chat_arc(openai.clone());
-                    reg.register_embed_arc(openai);
+                    reg.register_embed_arc(openai.clone());
+                    if vision_model.is_some() {
+                        reg.register_vision_arc(openai);
+                    }
                 }
                 ProviderConfig::WhisperCpp {
                     model,
@@ -434,7 +455,42 @@ impl Config {
                 ),
             );
         }
+        // Vision 路由（FR-MEDIA-02）：显式 routing.vision > 从 vision_model 自动派生
+        if let Some(r) = &self.routing.vision {
+            map.insert(Task::Vision, to_ref(r));
+        } else if let Some((pid, model)) = self.derive_vision_ref() {
+            map.insert(
+                Task::Vision,
+                (
+                    ProviderRef {
+                        provider_id: pid,
+                        model,
+                    },
+                    vec![],
+                ),
+            );
+        }
         Routing { map }
+    }
+
+    /// 找第一个配了 vision_model 的 provider（Ollama/OpenAi 均可）。
+    fn derive_vision_ref(&self) -> Option<(String, String)> {
+        for p in &self.providers {
+            let (pid, vm) = match p {
+                ProviderConfig::Ollama {
+                    vision_model: Some(m),
+                    ..
+                } => ("ollama", m.clone()),
+                ProviderConfig::OpenAi {
+                    id,
+                    vision_model: Some(m),
+                    ..
+                } => (id.as_str(), m.clone()),
+                _ => continue,
+            };
+            return Some((pid.to_string(), vm));
+        }
+        None
     }
 
     /// 找第一个配了 transcribe_model 的 OpenAi 兼容 provider，返回 (id, model)。
@@ -547,6 +603,7 @@ mod tests {
                 embed_model: "text-embedding-3-small".into(),
                 embed_dim: 1536,
                 transcribe_model: transcribe_model.map(String::from),
+                vision_model: None,
             }],
             routing: RoutingConfig {
                 transcribe: explicit_routing_transcribe,
@@ -588,6 +645,27 @@ mod tests {
         // 路由 map 里应有 transcribe 项（解析依赖注册的 provider，这里只验 routing 内容）
         let (entry, _fbs) = routing.map.get(&Task::Transcribe).unwrap();
         assert_eq!(entry.model, "whisper-large-v3");
+    }
+
+    #[test]
+    fn build_auto_derives_vision_routing_from_vision_model() {
+        // provider 配了 vision_model 即启用视觉路由（无需显式 routing.vision）。
+        let mut cfg = config_with_transcribe(None, None);
+        if let ProviderConfig::OpenAi { vision_model, .. } = &mut cfg.providers[0] {
+            *vision_model = Some("gpt-4o-mini".into());
+        }
+        let (reg, routing, _guard) = cfg.build();
+        let resolved = reg.vision_for(&routing, Task::Vision);
+        assert!(resolved.is_ok(), "vision routing should resolve");
+        assert_eq!(resolved.unwrap().1, "gpt-4o-mini");
+    }
+
+    #[test]
+    fn build_without_vision_model_has_no_vision_routing() {
+        let cfg = config_with_transcribe(None, None);
+        let (reg, routing, _guard) = cfg.build();
+        assert!(!routing.map.contains_key(&Task::Vision));
+        assert!(reg.vision_for(&routing, Task::Vision).is_err());
     }
 
     #[test]
