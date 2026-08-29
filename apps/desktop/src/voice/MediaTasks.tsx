@@ -113,6 +113,7 @@ export function MediaTasksPanel() {
               ✕
             </button>
           </div>
+          <p class="muted small">{t("tasks.cancelRunningHint")}</p>
           <Show
             when={tasks().length > 0}
             fallback={<p class="muted small">{t("tasks.empty")}</p>}
@@ -151,7 +152,7 @@ export function MediaTasksPanel() {
                           {t("tasks.retry")}
                         </button>
                       </Show>
-                      <Show when={task.status === "pending"}>
+                      <Show when={task.status === "pending" || task.status === "running"}>
                         <button class="btn-secondary" onClick={() => cancel(task.id)}>
                           {t("tasks.cancel")}
                         </button>

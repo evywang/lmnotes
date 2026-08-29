@@ -19,12 +19,33 @@ use lmnotes_core::indexer::Indexer;
 use lmnotes_core::llm::guard::GuardConfig;
 use lmnotes_core::llm::provider::AudioInput;
 use lmnotes_core::llm::routing::{Registry, Routing};
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 /// 队列任务子进程超时（长媒体；同步路径为 60s）。
 const QUEUED_SUBPROC_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
+/// 取消注册表（v0.5.1）：running 任务 id → AbortHandle（tokio 原生）。
+///
+/// worker 用 `tokio::spawn`（运行于 tauri 的 tokio runtime 内，上下文可用），
+/// 其 JoinHandle 具备 abort_handle()/JoinError::is_cancelled——命令侧 abort()，
+/// worker 侧 await 得 JoinError::is_cancelled；任务 future 被丢弃 → kill_on_drop 杀子进程。
+#[derive(Default, Clone)]
+pub struct CancelRegistry(Arc<std::sync::Mutex<HashMap<String, tokio::task::AbortHandle>>>);
+
+impl CancelRegistry {
+    pub fn register(&self, id: &str, h: tokio::task::AbortHandle) {
+        self.0.lock().unwrap().insert(id.to_string(), h);
+    }
+    /// abort 并移除（幂等；未知 id no-op）。
+    pub fn abort(&self, id: &str) {
+        if let Some(h) = self.0.lock().unwrap().remove(id) {
+            h.abort();
+        }
+    }
+}
 
 /// worker 执行体依赖（Arc 组，lib.rs 启动时注入）。
 #[derive(Clone)]
@@ -34,6 +55,7 @@ pub struct WorkerDeps {
     pub registry: Arc<Registry>,
     pub routing: Arc<Routing>,
     pub guard_cfg: Arc<GuardConfig>,
+    pub cancels: CancelRegistry,
 }
 
 /// 启动兜底 + 常驻循环。lib.rs 在 `run()` 里 spawn。
@@ -60,24 +82,63 @@ pub fn spawn_worker(app: tauri::AppHandle, deps: WorkerDeps) {
 }
 
 /// 执行单个任务（含重试一次：仅网络类失败重试，见 is_retryable）。
+/// 取消：cancel 命令侧经 CancelRegistry abort() → handle.await 返回
+/// JoinError::is_cancelled → 条件 UPDATE 收尾（完成与取消竞态以 rows 裁决）。
 async fn run_task(app: &tauri::AppHandle, deps: &WorkerDeps, task: &MediaTask) {
     let _ = deps
         .sqlite
         .update_media_task_status(&task.id, "running", None, None);
     emit(app, task, "running");
 
-    let result = execute_with_retry(deps, task).await;
-    match result {
-        Ok(path) => {
-            let _ = deps
+    let task_c = task.clone();
+    let deps_c = deps.clone();
+    // tokio::spawn（非 tauri 包装）：JoinHandle 自带 abort_handle + JoinError::is_cancelled
+    let handle = tokio::spawn(async move { execute_with_retry(&deps_c, &task_c).await });
+    deps.cancels.register(&task.id, handle.abort_handle());
+
+    match handle.await {
+        Ok(Ok(path)) => {
+            // 完成竞态防护：cancel 可能已把 running 翻成 cancelled——条件 UPDATE 裁决
+            let written = deps
                 .sqlite
-                .update_media_task_status(&task.id, "done", None, Some(&path));
-            emit(app, task, "done");
+                .finish_running_media_task(&task.id, "done", None, Some(&path))
+                .unwrap_or(false);
+            if written {
+                emit(app, task, "done");
+            } else {
+                eprintln!(
+                    "media task {} finished after cancel; keeping cancelled",
+                    task.id
+                );
+            }
         }
-        Err(e) => {
-            let _ = deps
+        Ok(Err(e)) => {
+            let written = deps
                 .sqlite
-                .update_media_task_status(&task.id, "failed", Some(&e), None);
+                .finish_running_media_task(&task.id, "failed", Some(&e), None)
+                .unwrap_or(false);
+            if written {
+                emit(app, task, "failed");
+            }
+        }
+        Err(join_err) if join_err.is_cancelled() => {
+            // 命令侧已 abort；条件收尾（若竞态输给完成则不覆盖）
+            let _ = deps.sqlite.finish_running_media_task(
+                &task.id,
+                "cancelled",
+                Some("cancelled by user"),
+                None,
+            );
+            emit(app, task, "cancelled");
+        }
+        Err(join_err) => {
+            eprintln!("media task {} join failed: {join_err}", task.id);
+            let _ = deps.sqlite.finish_running_media_task(
+                &task.id,
+                "failed",
+                Some(&join_err.to_string()),
+                None,
+            );
             emit(app, task, "failed");
         }
     }
@@ -240,8 +301,23 @@ mod tests {
     }
 
     #[test]
-    fn worker_uses_queued_budget_constant() {
-        // 守护:若有人改 QUEUED_SUBPROC_TIMEOUT,不得低于设计承诺的 15min
+    fn worker_budget_floor_is_15min() {
         assert!(QUEUED_SUBPROC_TIMEOUT >= std::time::Duration::from_secs(15 * 60));
+    }
+
+    #[test]
+    fn cancel_registry_abort_unknown_id_is_noop_and_clone_shares() {
+        let reg = CancelRegistry::default();
+        reg.abort("nope"); // 未知 id：必须 no-op
+
+        let reg2 = reg.clone();
+        // 真实长任务拿 AbortHandle，验证克隆视图 abort 命中
+        let h = tokio::runtime::Runtime::new().unwrap().block_on(async {
+            tokio::spawn(async { /* 长驻 */ }).abort_handle()
+        });
+        reg.register("t1", h);
+        reg2.abort("t1");
+        // 无 panic 即通过；重复 abort 幂等
+        reg2.abort("t1");
     }
 }

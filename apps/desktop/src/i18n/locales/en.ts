@@ -117,6 +117,7 @@ export const en = {
   "tasks.openResult": "Open note",
   "tasks.retry": "Retry",
   "tasks.cancel": "Cancel",
+  "tasks.cancelRunningHint": "Cancelling a running task kills its subprocess immediately.",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "Polish",

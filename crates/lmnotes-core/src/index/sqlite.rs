@@ -608,6 +608,41 @@ impl SqliteIndex {
         Ok(n as u64)
     }
 
+    /// 取消排队中的任务（条件 UPDATE，rows=0 表示已非 pending——防 worker 拉取竞态）。
+    pub fn cancel_pending_media_task(&self, id: &str) -> crate::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE media_tasks SET status='cancelled', error='cancelled by user', updated_at=?2
+             WHERE id=?1 AND status='pending'",
+            rusqlite::params![id, chrono::Utc::now().timestamp()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// 收尾 running 任务（done/failed/cancelled）。条件 UPDATE 仅在仍为 running 时生效——
+    /// 以 rows 裁决完成与取消的竞态（先到者赢，后到者不改写）。返回是否写成功。
+    pub fn finish_running_media_task(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+        result_path: Option<&str>,
+    ) -> crate::Result<bool> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE media_tasks SET status=?2, error=?3, result_path=?4, updated_at=?5
+             WHERE id=?1 AND status='running'",
+            rusqlite::params![
+                id,
+                status,
+                error,
+                result_path,
+                chrono::Utc::now().timestamp()
+            ],
+        )?;
+        Ok(n > 0)
+    }
+
     /// 拉取待处理任务（FIFO：created_at 升序），limit 条。
     pub fn pending_media_tasks(&self, limit: usize) -> crate::Result<Vec<MediaTask>> {
         let conn = self.conn.lock().unwrap();
@@ -847,6 +882,43 @@ mod tests {
         );
         // limit 生效
         assert_eq!(idx.pending_media_tasks(1).unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cancel_pending_is_conditional_and_finish_running_is_conditional() {
+        // v0.5.1 取消语义：条件 UPDATE 以 rows 裁决，杜绝完成/取消竞态说谎。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.insert_media_task(&media_task("mt_c1", "pending", 100))
+            .unwrap();
+        idx.insert_media_task(&media_task("mt_c2", "pending", 101))
+            .unwrap();
+
+        // pending 取消：命中
+        assert!(idx.cancel_pending_media_task("mt_c1").unwrap());
+        // 再取消：已非 pending → false（幂等）
+        assert!(!idx.cancel_pending_media_task("mt_c1").unwrap());
+
+        // worker 拉起 mt_c2 → running；此时 pending 取消不再命中
+        idx.update_media_task_status("mt_c2", "running", None, None)
+            .unwrap();
+        assert!(!idx.cancel_pending_media_task("mt_c2").unwrap());
+
+        // finish_running：done 写入成功；重复 finish 不覆盖（已非 running）
+        assert!(idx
+            .finish_running_media_task("mt_c2", "done", None, Some("t.md"))
+            .unwrap());
+        assert!(!idx
+            .finish_running_media_task("mt_c2", "cancelled", Some("late"), None)
+            .unwrap());
+        let got = idx
+            .list_media_tasks(None)
+            .unwrap()
+            .into_iter()
+            .find(|t| t.id == "mt_c2")
+            .unwrap();
+        assert_eq!(got.status, "done", "late cancel must NOT overwrite done");
+        assert_eq!(got.result_path.as_deref(), Some("t.md"));
     }
 
     #[test]

@@ -231,12 +231,14 @@ pub fn run() {
     };
 
     // 媒体任务 worker 依赖（在 manage() 移动 Arc 之前克隆）
+    let cancel_registry = media_tasks::CancelRegistry::default();
     let worker_deps = media_tasks::WorkerDeps {
         indexer: indexer.clone(),
         sqlite: meta.clone(),
         registry: registry.clone(),
         routing: routing.clone(),
         guard_cfg: guard_cfg.clone(),
+        cancels: cancel_registry.clone(),
     };
 
     tauri::Builder::default()
@@ -252,6 +254,7 @@ pub fn run() {
         .manage(guard_cfg.clone())
         .manage(HoldWatcher(watcher))
         .manage(mcp_hold)
+        .manage(cancel_registry)
         .setup(move |app| {
             let worker_deps = worker_deps;
             // 媒体任务后台 worker（v0.5 FR-MEDIA-04）：running→pending 兜底 + 常驻循环

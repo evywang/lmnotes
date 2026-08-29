@@ -118,6 +118,7 @@ export const zh: Record<MessageKey, string> = {
   "tasks.openResult": "打开笔记",
   "tasks.retry": "重试",
   "tasks.cancel": "取消",
+  "tasks.cancelRunningHint": "取消运行中的任务会立即终止其子进程。",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "润色",

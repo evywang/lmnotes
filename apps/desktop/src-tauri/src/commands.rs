@@ -1454,10 +1454,22 @@ pub fn retry_media_task(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Resu
 
 /// 取消任务（仅 pending；running 不强杀——worker 单并发很快轮到）。
 #[tauri::command]
-pub fn cancel_media_task(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
-    sqlite
-        .update_media_task_status(&id, "cancelled", Some("cancelled by user"), None)
-        .map_err(|e| e.to_string())
+pub fn cancel_media_task(
+    id: String,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    cancels: State<'_, crate::media_tasks::CancelRegistry>,
+) -> Result<(), String> {
+    // 两步法（v0.5.1，严格防竞态）：
+    // ① pending → 条件直翻（rows=0 说明 worker 已拉起为 running）
+    // ② running → 经注册表 abort（worker 侧以条件 UPDATE 收尾，完成/取消不互相覆盖）
+    if sqlite
+        .cancel_pending_media_task(&id)
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(());
+    }
+    cancels.abort(&id);
+    Ok(())
 }
 
 /// 媒体文件转转录笔记（FR-CAP-04）：拖拽/粘贴的音频或视频文件。
