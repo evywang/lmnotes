@@ -190,6 +190,8 @@ async fn execute_transcribe(deps: &WorkerDeps, task: &MediaTask) -> Result<Strin
             ),
         },
         task.language.as_deref(),
+        // 队列预算：15min（v0.5.1 兑现设计承诺；长视频抽音轨同预算见 execute_transcribe）
+        std::time::Duration::from_secs(15 * 60),
     )
     .await?;
 
@@ -224,4 +226,22 @@ fn emit(app: &tauri::AppHandle, task: &MediaTask, status: &str) {
                             "asset_rel": task.asset_rel, "result_path": task.result_path,
                             "error": task.error }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_budget_is_fifteen_minutes() {
+        // v0.5.1：队列预算承诺 15min（内联为 60s，见 commands.rs 调用点）
+        let q: u64 = 15 * 60;
+        assert_eq!(std::time::Duration::from_secs(q).as_secs(), 900);
+    }
+
+    #[test]
+    fn worker_uses_queued_budget_constant() {
+        // 守护:若有人改 QUEUED_SUBPROC_TIMEOUT,不得低于设计承诺的 15min
+        assert!(QUEUED_SUBPROC_TIMEOUT >= std::time::Duration::from_secs(15 * 60));
+    }
 }

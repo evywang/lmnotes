@@ -689,6 +689,7 @@ pub(crate) async fn transcribe_with_fallback(
     guard_cfg: &GuardConfig,
     audio: lmnotes_core::llm::provider::AudioInput,
     language: Option<&str>,
+    budget: std::time::Duration,
 ) -> Result<(lmnotes_core::llm::provider::Transcript, String), String> {
     // 候选日志默认关闭（每次转录都打太吵）；LMNOTES_DEBUG=1 打开用于排查。
     if std::env::var("LMNOTES_DEBUG").is_ok() {
@@ -701,10 +702,20 @@ pub(crate) async fn transcribe_with_fallback(
                 .collect::<Vec<_>>()
         );
     }
-    lmnotes_core::llm::transcribe_fallback::try_transcribe_with_fallback(
-        registry, routing, guard_cfg, audio, language,
+    // 预算归调用点所有（v0.5.1）：内联 60s / 队列 15min；覆盖整条 fallback 链
+    //（云端尝试 + 本地降级共享预算）。超时丢弃 future → kill_on_drop 终止子进程。
+    tokio::time::timeout(
+        budget,
+        lmnotes_core::llm::transcribe_fallback::try_transcribe_with_fallback(
+            registry, routing, guard_cfg, audio, language,
+        ),
     )
     .await
+    .map_err(|_| {
+        let msg = format!("transcription timed out ({}s)", budget.as_secs());
+        eprintln!("transcribe budget exceeded: {msg}");
+        msg
+    })?
     .map_err(|e| {
         eprintln!("transcribe failed: {e}");
         e.to_string()
@@ -860,6 +871,8 @@ pub async fn create_voice_note(
             filename,
         },
         language.as_deref(),
+        // 内联速记预算：60s（长媒体走队列，v0.5.1）
+        std::time::Duration::from_secs(60),
     )
     .await?;
 
@@ -1517,6 +1530,8 @@ pub async fn create_media_note(
             filename,
         },
         language.as_deref(),
+        // 内联速记预算：60s（长媒体走队列，v0.5.1）
+        std::time::Duration::from_secs(60),
     )
     .await?;
 

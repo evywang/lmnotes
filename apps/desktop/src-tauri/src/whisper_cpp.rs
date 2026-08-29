@@ -19,7 +19,6 @@ use lmnotes_core::llm::provider::{
 };
 use lmnotes_core::Result;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tokio::process::Command;
 
 /// whisper.cpp 本地转录 Provider。
@@ -111,6 +110,8 @@ impl TranscribeCap for WhisperCppProvider {
         }
 
         // 2) 跑 whisper.cpp 子进程。
+        // 超时归调用点所有（v0.5.1：内联 60s / 队列 15min，见 transcribe_with_fallback）；
+        // 此处不再自设上限——调用方超时丢弃 future 时 kill_on_drop 终止子进程。
         let mut cmd = build_whisper_cmd(
             &self.binary_path,
             &self.model_path,
@@ -119,12 +120,7 @@ impl TranscribeCap for WhisperCppProvider {
             language,
             self.threads,
         );
-        // 60s 超时（长音频留 FR-CAP-09 后台队列）。
-        let output = tokio::time::timeout(Duration::from_secs(60), cmd.output())
-            .await
-            .map_err(|_| {
-                lmnotes_core::CoreError::Conformance("whisper.cpp timed out (60s)".into())
-            })??;
+        let output = cmd.output().await.map_err(lmnotes_core::CoreError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -187,11 +183,9 @@ async fn run_ffmpeg_transcode(ffmpeg: &Path, in_path: &Path, out_path: &Path) ->
         .arg("-c:a")
         .arg("pcm_s16le")
         .arg(out_path);
-    // 与 whisper 步骤同享 60s 上限：损坏输入/异常编码不应挂死整条命令。
-    let output = tokio::time::timeout(Duration::from_secs(60), cmd.output())
-        .await
-        .map_err(|_| lmnotes_core::CoreError::Conformance("ffmpeg timed out (60s)".into()))?
-        .map_err(lmnotes_core::CoreError::Io)?;
+    // 超时归调用点所有（v0.5.1，与 whisper 步骤一致）：调用方以 budget 包裹整条链，
+    // 超时丢弃 future 时 kill_on_drop 终止 ffmpeg。
+    let output = cmd.output().await.map_err(lmnotes_core::CoreError::Io)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(lmnotes_core::CoreError::Conformance(format!(
@@ -233,6 +227,11 @@ mod tests {
         let cmd = build_whisper_cmd(binary, model, wav, out, Some("zh"), 4);
         // Command 内部 args 不可直接读，但可通过 format! 粗检（Debug 输出）。
         let dbg = format!("{cmd:?}");
+        // v0.5.1：超时归调用点 → kill_on_drop 必须开启（丢弃 future 即杀子进程）
+        assert!(
+            dbg.contains("kill_on_drop: true"),
+            "missing kill_on_drop: {dbg}"
+        );
         for needle in [
             "/usr/bin/whisper",
             "-m",
