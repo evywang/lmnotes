@@ -45,6 +45,10 @@ impl CancelRegistry {
             h.abort();
         }
     }
+    /// 仅移除条目（worker 正常收尾路径；不触发 abort）。
+    pub fn unregister(&self, id: &str) {
+        self.0.lock().unwrap().remove(id);
+    }
 }
 
 /// worker 执行体依赖（Arc 组，lib.rs 启动时注入）。
@@ -142,6 +146,9 @@ async fn run_task(app: &tauri::AppHandle, deps: &WorkerDeps, task: &MediaTask) {
             emit(app, task, "failed");
         }
     }
+
+    // v0.5.1 GAP-3 审计修复：任务已终态，移除注册表条目（否则无界增长）
+    deps.cancels.unregister(&task.id);
 }
 
 async fn execute_with_retry(deps: &WorkerDeps, task: &MediaTask) -> Result<String, String> {
@@ -292,6 +299,7 @@ fn emit(app: &tauri::AppHandle, task: &MediaTask, status: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
     fn queued_budget_is_fifteen_minutes() {
@@ -319,5 +327,21 @@ mod tests {
         reg2.abort("t1");
         // 无 panic 即通过；重复 abort 幂等
         reg2.abort("t1");
+    }
+
+    #[test]
+    fn cancel_registry_unregister_does_not_abort() {
+        // v0.5.1 GAP-3：正常收尾走 unregister——不得触发 abort 闭包
+        let reg = CancelRegistry::default();
+        let fired = Arc::new(AtomicBool::new(false));
+        let h = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(async { tokio::spawn(async {}).abort_handle() });
+        reg.register("t3", h);
+        reg.unregister("t3");
+        reg.unregister("t3"); // 幂等：条目已移除，不 panic
+                              // unregister 语义 = 仅移除（不触发 abort）：条目已删，后续 abort 对 t3 为 no-op
+        reg.abort("t3");
+        assert!(!fired.load(Ordering::SeqCst), "unregister must not abort");
     }
 }

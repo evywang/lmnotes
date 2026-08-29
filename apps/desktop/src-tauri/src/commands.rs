@@ -1574,6 +1574,8 @@ pub(crate) fn build_extract_audio_cmd(
     out: &Path,
 ) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(ffmpeg);
+    // v0.5.1 GAP-1 审计修复：超时丢弃 future 时必须连带杀 ffmpeg（孤儿进程防护）
+    cmd.kill_on_drop(true);
     cmd.arg("-y")
         .arg("-i")
         .arg(input)
@@ -1590,10 +1592,15 @@ pub(crate) fn build_extract_audio_cmd(
 
 /// ffmpeg 抽音轨（参数见 build_extract_audio_cmd）。
 async fn extract_audio_track(ffmpeg: &Path, input: &Path, out: &Path) -> Result<(), String> {
-    let output = build_extract_audio_cmd(ffmpeg, input, out)
-        .output()
-        .await
-        .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
+    // v0.5.1 GAP-2 审计修复：内联路径 60s 预算（同内联转录；超时丢弃 future → kill_on_drop 杀 ffmpeg）。
+    // 大视频请走队列（worker 抽音轨预算 15min）。
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(60),
+        build_extract_audio_cmd(ffmpeg, input, out).output(),
+    )
+    .await
+    .map_err(|_| "ffmpeg audio extraction timed out (60s)".to_string())?
+    .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
@@ -2620,6 +2627,11 @@ mod tests {
             std::path::Path::new("out.wav"),
         );
         let dbg = format!("{cmd:?}");
+        // v0.5.1 GAP-1：与 build_whisper_cmd 同要求——kill_on_drop 必须开启
+        assert!(
+            dbg.contains("kill_on_drop: true"),
+            "missing kill_on_drop: {dbg}"
+        );
         for needle in ["-vn", "16000", "pcm_s16le", "in.mp4", "out.wav"] {
             assert!(dbg.contains(needle), "cmd missing {needle:?}: {dbg}");
         }
