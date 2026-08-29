@@ -257,7 +257,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-STORE-02 | 读写符合 §3.3 的笔记文件；frontmatter 字段强校验，损坏文件只读保护不丢数据 | MVP |
 | FR-STORE-03 | 资源文件 SHA-256 去重存储；引用通过相对路径 | MVP |
 | FR-STORE-04 | 文件系统实时监听（vault 目录被外部编辑能感知并重建增量索引） | P1 |
-| FR-STORE-05 | 一键导出 Vault 为 zip / 初始化 git 仓库 | P1 |
+| FR-STORE-05 | 一键导出 Vault 为 zip / 初始化 git 仓库（✅ v0.5.0 已实现） | P1 |
 | FR-STORE-06 | 从 Obsidian/Foam/纯 Markdown 目录 best-effort 导入（含 wikilink 转换） | P2 |
 
 ### 5.2 捕获与编辑（域：CAPTURE）
@@ -270,8 +270,8 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-CAP-05 | 语音输入：按住说话 / 流式转录，可选用本地 Whisper 或云端（✅ MVP 已实现点按录音+云端 Whisper 批量转录，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)；push-to-talk/流式/本地引擎留 P1） | MVP |
 | FR-CAP-06 | 移动端"速记"入口（下拉通知/小组件/Share Sheet 接收外部分享） | P1 |
 | FR-CAP-07 | 块级拖拽、折叠、列表大纲模式 | P1 |
-| FR-CAP-08 | 模板系统（每日笔记模板、会议模板等，支持 frontmatter 占位符） | P1 |
-| FR-CAP-09 | 离线录制视频/长音频上传后后台转录，完成通知 | P2 |
+| FR-CAP-08 | 模板系统（每日笔记模板、会议模板等，支持 frontmatter 占位符）（✅ v0.5.0 已实现） | P1 |
+| FR-CAP-09 | 离线录制视频/长音频上传后后台转录，完成通知（✅ v0.5.0 并入媒体任务队列） | P2 |
 
 ### 5.3 多模态处理（域：MEDIA）
 | ID | 需求 | 优先级 |
@@ -279,7 +279,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-MEDIA-01 | 音频自动转录（Whisper 兼容引擎），转录稿写入 `type: transcript` 的描述 concept（§3.5）（✅ MVP 已实现，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)） | MVP |
 | FR-MEDIA-02 | 图片 OCR + 视觉描述（多模态 LLM 或专用模型）（✅ v0.4.0 已实现：VisionCap + image-desc concept） | P1 |
 | FR-MEDIA-03 | 视频抽关键帧 + 转录音轨；关键帧索引化 | P2 |
-| FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑 | MVP |
+| FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑（✅ v0.5.0 已实现：media_tasks 表 + 后台 worker + 任务中心） | MVP |
 | FR-MEDIA-05 | 处理引擎可插拔（本地 whisper.cpp / 云端 API）（✅ 已实现：云端 Whisper + 本地 whisper.cpp sidecar，运行时自动降级，见 [ADR-0007](../adr/ADR-0007-local-stt-fallback.md)） | P1 |
 
 ### 5.4 LLM 智能（域：LLM）—— 核心差异化

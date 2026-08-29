@@ -16,11 +16,11 @@
 | FR-LLM-09 建议回滚 UI | P1 | ✅ v0.3.0 | 历史面板:列表/预览/恢复(接受建议写回仍留 M1c) |
 | FR-LLM-06 行动项抽取 | P1 | ✅ v0.3.0 | transcript/meeting 笔记一键抽取 checklist |
 | FR-MEDIA-02 图片 OCR / 视觉描述 | P1 | ❌ 未实现 | |
-| FR-CAP-08 模板系统 | P1 | ❌ 未实现 | |
+| FR-CAP-08 模板系统 | P1 | ✅ v0.5.0 | templates/ + {{title}}/{{date}} 等占位符 |
 | 语音遗留(按住说话 / 流式 / 断点续传) | P1 | ❌ | 见 [ADR-0006](adr/ADR-0006-voice-transcription.md) / [ADR-0007](adr/ADR-0007-local-stt-fallback.md) 遗留清单 |
-| FR-STORE-05 导出 zip / git init | P1 | ❌ | |
-| macOS 打包 | — | ❌ | release 矩阵仅 Win + Linux(sidecar 需签名公证) |
-| FR-CAP-09 长音频后台转录 | P2 | ❌ | 依赖 FR-MEDIA-04 任务队列 |
+| FR-STORE-05 导出 zip / git init | P1 | ✅ v0.5.0 | 流式 zip(排除派生数据) + 探测式 git init |
+| macOS 打包 | — | ✅ v0.5.0 | CI 源码构建 sidecar;无 Apple 账号发未签名 dmg |
+| FR-CAP-09 长音频后台转录 | P2 | ✅ v0.5.0 | 已并入任务队列(注:本地 whisper 子进程仍 60s 上限,长音频走云端批量) |
 | FR-LLM-07 每日回顾 / 周报 | P2 | ❌ | |
 | FR-STORE-06 Obsidian/Foam 导入 | P2 | ❌ | |
 | FR-CAP-06 移动端速记 | P2 | ❌ | 依赖核心跨端复用验证 |
@@ -46,14 +46,14 @@
 | **FR-MEDIA-02 OCR / 视觉描述** | 与 transcript 同构:图片 → 多模态 LLM → `type: image-desc` concept(PRD §3.5 已定义格式);OpenAI 兼容 vision + Ollama llava 双路由,护栏同 ADR-0005 | M | ✅ |
 | 语音打磨包 | 按住说话(push-to-talk)、模型下载断点续传(HTTP Range) | S | ✅(续传于评审轮 2 落地) |
 
-### v0.5.0「效率与分发」([实施设计](superpowers/plans/2026-08-29-v0.5.0-efficiency-and-distribution.md)) 🥇 下一站
+### v0.5.0「效率与分发」✅ 已实现([实施设计](superpowers/plans/2026-08-29-v0.5.0-efficiency-and-distribution.md))
 
 | 功能 | 实现路径 | 量级 |
 |---|---|---|
-| **FR-MEDIA-04 任务队列**(MVP 欠账) | SQLite 任务表 + 后台 worker + 前端任务中心(暂停/重试/进度);顺带收编 FR-CAP-09 长音频后台转录 | L |
-| FR-CAP-08 模板系统 | `templates/` 目录 + frontmatter 占位符替换 + 新建笔记时选模板 | S |
-| FR-STORE-05 导出 zip / git init | 后端命令 + 设置页按钮 | S |
-| macOS 打包 | release 矩阵加 `aarch64-apple-darwin` sidecar + 签名公证(需开发者账号) | M |
+| **FR-MEDIA-04 任务队列**(MVP 欠账) | SQLite 任务表 + 后台 worker + 前端任务中心(暂停/重试/进度);顺带收编 FR-CAP-09 长音频后台转录 | L | ✅ |
+| FR-CAP-08 模板系统 | `templates/` 目录 + frontmatter 占位符替换 + 新建笔记时选模板 | S | ✅ |
+| FR-STORE-05 导出 zip / git init | 后端命令 + 设置页按钮 | S | ✅ |
+| macOS 打包 | release 矩阵加 `aarch64-apple-darwin` sidecar + 签名公证(需开发者账号) | M | ✅(未签名 dmg 无账号可发) |
 
 ---
 
