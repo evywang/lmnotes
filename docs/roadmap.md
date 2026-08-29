@@ -20,7 +20,7 @@
 | 语音遗留(按住说话 / 流式 / 断点续传) | P1 | ❌ | 见 [ADR-0006](adr/ADR-0006-voice-transcription.md) / [ADR-0007](adr/ADR-0007-local-stt-fallback.md) 遗留清单 |
 | FR-STORE-05 导出 zip / git init | P1 | ✅ v0.5.0 | 流式 zip(排除派生数据) + 探测式 git init |
 | macOS 打包 | — | ✅ v0.5.0 | CI 源码构建 sidecar;无 Apple 账号发未签名 dmg |
-| FR-CAP-09 长音频后台转录 | P2 | ✅ v0.5.0 | 已并入任务队列(注:本地 whisper 子进程仍 60s 上限,长音频走云端批量) |
+| FR-CAP-09 长音频后台转录 | P2 | ✅ v0.5.0 | 已并入任务队列;本地子进程预算 60s/队列 15min 见 [v0.5.1 设计](superpowers/plans/2026-08-29-v0.5.1-task-cancel-and-timeouts.md) |
 | FR-LLM-07 每日回顾 / 周报 | P2 | ❌ | |
 | FR-STORE-06 Obsidian/Foam 导入 | P2 | ❌ | |
 | FR-CAP-06 移动端速记 | P2 | ❌ | 依赖核心跨端复用验证 |
