@@ -22,6 +22,8 @@ jobs:
             target: x86_64-unknown-linux-gnu
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+          - platform: macos-latest
+            target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -46,9 +48,18 @@ jobs:
       - name: Install frontend dependencies
         run: cd apps/desktop && npm ci
 
-      - name: Fetch whisper.cpp + ffmpeg sidecar binaries (ADR-0007)
+      - name: Install sidecar build tools (macOS source builds)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Fetch/build whisper.cpp + ffmpeg sidecar binaries (ADR-0007)
         shell: bash
-        run: .github/scripts/fetch-sidecars.sh ${{ matrix.target }}
+        run: |
+          if [[ "${{ matrix.target }}" == *darwin* ]]; then
+            .github/scripts/build-sidecars-macos.sh ${{ matrix.target }}
+          else
+            .github/scripts/fetch-sidecars.sh ${{ matrix.target }}
+          fi
 
       # 运行时注入 externalBin（dev 不需要，避免本地构建报缺二进制）。
       # 经 tauri build --config <文件> 传入——实测 TAURI_CONFIG 环境变量在
@@ -59,11 +70,26 @@ jobs:
       - name: Select sidecar bundle config (per-OS)
         shell: bash
         run: |
-          if [[ "${{ matrix.target }}" == *windows* ]]; then
-            echo "TAURI_ARGS=--config ${{ github.workspace }}/apps/desktop/src-tauri/sidecar-win.json" >> "$GITHUB_ENV"
-          else
-            echo "TAURI_ARGS=--config ${{ github.workspace }}/apps/desktop/src-tauri/sidecar-linux.json" >> "$GITHUB_ENV"
-          fi
+          case "${{ matrix.target }}" in
+            *windows*) f=sidecar-win.json ;;
+            *darwin*)  f=sidecar-macos.json ;;
+            *)         f=sidecar-linux.json ;;
+          esac
+          echo "TAURI_ARGS=--config ${{ github.workspace }}/apps/desktop/src-tauri/$f" >> "$GITHUB_ENV"
+
+      # 可选签名/公证（ADR-0007/设计）：无 Apple Secrets 时跳过（产物为未签名 dmg）。
+      - name: Codesign & notarize (optional)
+        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "Signing handled by tauri-action via APPLE_* env (tauri.conf signingIdentity)."
+          # tauri-action 检测到 APPLE_CERTIFICATE/APPLE_ID 等环境变量时自动 codesign+notarytool
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
@@ -74,6 +100,6 @@ jobs:
           args: ${{ env.TAURI_ARGS }}
           tagName: ${{ github.ref_name }}
           releaseName: "LMNotes ${{ github.ref_name }}"
-          releaseBody: "LMNotes v0.2 — voice input (cloud Whisper + offline whisper.cpp fallback), see release notes for details."
+          releaseBody: "LMNotes v0.5 — background media tasks, note templates, vault export, macOS builds (unsigned dmg). See release notes."
           releaseDraft: true
           prerelease: false
