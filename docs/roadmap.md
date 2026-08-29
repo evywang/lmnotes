@@ -37,7 +37,7 @@
 | **FR-LLM-06 行动项抽取** | transcript/meeting 笔记工具栏按钮 → `extract_action_items`(复用 Summarize 路由 + 护栏读 `llm_local_only`)→ checklist 追加正文 | S | ✅ |
 | **FR-LLM-09 快照恢复 UI** | 「🕘 历史」面板:`list_snapshots`/`read_snapshot` + 预览 + 全文替换恢复(进 CM history 可撤销) | S | ✅ |
 
-### v0.4.0「多库与媒体」— 基础能力 + 多模态收口 🥇 下一站
+### v0.4.0「多库与媒体」— 基础能力 + 多模态收口 🥇 下一站([实施设计](superpowers/plans/2026-08-29-v0.4.0-vaults-and-media.md))
 
 | 功能 | 实现路径 | 量级 |
 |---|---|---|
@@ -46,7 +46,7 @@
 | **FR-MEDIA-02 OCR / 视觉描述** | 与 transcript 同构:图片 → 多模态 LLM → `type: image-desc` concept(PRD §3.5 已定义格式);OpenAI 兼容 vision + Ollama llava 双路由,护栏同 ADR-0005 | M |
 | 语音打磨包 | 按住说话(push-to-talk)、模型下载断点续传(HTTP Range) | S |
 
-### v0.5.0「效率与分发」
+### v0.5.0「效率与分发」([实施设计](superpowers/plans/2026-08-29-v0.5.0-efficiency-and-distribution.md))
 
 | 功能 | 实现路径 | 量级 |
 |---|---|---|
