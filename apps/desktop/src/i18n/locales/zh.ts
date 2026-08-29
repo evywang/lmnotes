@@ -9,6 +9,8 @@ export const zh: Record<MessageKey, string> = {
   "app.searchPlaceholder": "搜索…（回车）",
   "app.newNoteTitle": "新笔记",
   "app.noteTitlePrompt": "笔记标题：",
+  "app.templatePrompt": "模板名（留空 = 空白笔记）：",
+  "app.noTemplate": "（空白笔记）",
   "app.newNoteBtn": "+ 新建",
   "app.newNoteTooltip": "新建笔记",
   "app.importBtn": "📥 导入",
@@ -103,6 +105,19 @@ export const zh: Record<MessageKey, string> = {
 
   // ── 双链补全 (FR-CAP-03) ──────────────────────────────────────────────
   "linkComplete.detail": "笔记",
+
+  // ── 媒体任务中心 (FR-MEDIA-04) ────────────────────────────────────────
+  "tasks.openBtn": "⏳ 任务",
+  "tasks.title": "媒体任务",
+  "tasks.empty": "暂无媒体任务。拖一个音视频文件到编辑器即可后台转录。",
+  "tasks.pending": "排队中",
+  "tasks.running": "处理中",
+  "tasks.done": "已完成",
+  "tasks.failed": "失败",
+  "tasks.cancelled": "已取消",
+  "tasks.openResult": "打开笔记",
+  "tasks.retry": "重试",
+  "tasks.cancel": "取消",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "润色",

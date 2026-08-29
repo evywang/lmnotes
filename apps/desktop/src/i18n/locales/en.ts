@@ -8,6 +8,8 @@ export const en = {
   "app.searchPlaceholder": "Search… (Enter)",
   "app.newNoteTitle": "New note",
   "app.noteTitlePrompt": "Note title:",
+  "app.templatePrompt": "Template name (empty = blank note):",
+  "app.noTemplate": "(blank note)",
   "app.newNoteBtn": "+ New",
   "app.newNoteTooltip": "New note",
   "app.importBtn": "📥 Import",
@@ -102,6 +104,19 @@ export const en = {
 
   // ── Link completion (FR-CAP-03) ───────────────────────────────────────
   "linkComplete.detail": "note",
+
+  // ── Media task center (FR-MEDIA-04) ──────────────────────────────────
+  "tasks.openBtn": "⏳ Tasks",
+  "tasks.title": "Media Tasks",
+  "tasks.empty": "No media tasks yet. Drop an audio/video file into the editor to transcribe it in the background.",
+  "tasks.pending": "Queued",
+  "tasks.running": "Running",
+  "tasks.done": "Done",
+  "tasks.failed": "Failed",
+  "tasks.cancelled": "Cancelled",
+  "tasks.openResult": "Open note",
+  "tasks.retry": "Retry",
+  "tasks.cancel": "Cancel",
 
   // ── Rewrite menu ──────────────────────────────────────────────────────
   "rewrite.polish": "Polish",

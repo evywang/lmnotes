@@ -1333,3 +1333,80 @@ body {
   user-select: none;
   touch-action: none;
 }
+
+/* 媒体任务中心（FR-MEDIA-04） */
+.tasks-box {
+  width: 620px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.task-list {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.task-item {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.task-main {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.task-asset {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.92rem;
+}
+.task-badge {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.task-badge.running {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.task-badge.done {
+  border-color: #2a9d5c;
+  color: #2a9d5c;
+}
+.task-badge.failed {
+  border-color: #d33;
+  color: #d33;
+}
+.task-meta {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+  text-decoration: underline;
+}
+.task-error {
+  margin: 0;
+  color: #d33;
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+.task-actions {
+  display: flex;
+  gap: 0.4rem;
+}

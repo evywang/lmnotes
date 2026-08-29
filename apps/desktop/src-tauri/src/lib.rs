@@ -273,6 +273,8 @@ pub fn run() {
             commands::create_voice_note,
             commands::create_media_note,
             commands::describe_image,
+            commands::list_templates,
+            commands::create_note_from_template,
             commands::cancel_media_task,
             commands::retry_media_task,
             commands::enqueue_media_task,

@@ -7,6 +7,7 @@ import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { VoiceCapture } from "./voice/VoiceCapture";
+import { MediaTasksButton, MediaTasksPanel, initMediaTaskFeed } from "./voice/MediaTasks";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
@@ -70,14 +71,46 @@ export function App() {
       setVoiceOpen(true);
     }
   };
+  onMount(() => initMediaTaskFeed());
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
+
+  // 模板清单（懒加载一次）；新建时若选了模板 → create_note_from_template
+  let templatesCache: { name: string; path: string }[] | null = null;
+  const loadTemplates = async () => {
+    if (!templatesCache) {
+      try {
+        templatesCache = await invoke<{ name: string; path: string }[]>("list_templates");
+      } catch {
+        templatesCache = [];
+      }
+    }
+    return templatesCache;
+  };
 
   const createNote = async () => {
     const title = await showPrompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
     if (!title) return;
     try {
-      const path = await invoke<string>("create_note", { title });
+      const templates = await loadTemplates();
+      let path: string;
+      if (templates.length > 0) {
+        // 有模板：二次弹选（含"空白笔记"项）
+        const names = [t("app.noTemplate"), ...templates.map((t2) => t2.name)];
+        const picked = await showPrompt(t("app.templatePrompt"), "");
+        // showPrompt 只能输入文本；模板较多时体验一般——保持轻量：输入名称精确匹配，空 = 空白
+        const wanted = picked?.trim();
+        const tpl = wanted ? templates.find((t2) => t2.name === wanted) : undefined;
+        if (wanted && !tpl) return; // 输入了未知模板名 → 取消
+        path = tpl
+          ? await invoke<string>("create_note_from_template", {
+              templatePath: tpl.path,
+              title,
+            })
+          : await invoke<string>("create_note", { title });
+      } else {
+        path = await invoke<string>("create_note", { title });
+      }
       setActivePath(path);
       runSearch("");
       setTreeRefresh((n) => n + 1);
@@ -131,6 +164,7 @@ export function App() {
             </button>
           </div>
           <VaultBadge onOpenSettings={() => setSettingsOpen(true)} />
+          <MediaTasksButton />
           <button class="chat-btn" onClick={() => setChatOpen(true)}>
             {t("app.chatBtn")}
           </button>
@@ -199,6 +233,7 @@ export function App() {
       <Show when={captureOpen()}>
         <Capture onClose={() => setCaptureOpen(false)} />
       </Show>
+      <MediaTasksPanel />
       <Show when={voiceOpen()}>
         <VoiceCapture
           onClose={() => setVoiceOpen(false)}

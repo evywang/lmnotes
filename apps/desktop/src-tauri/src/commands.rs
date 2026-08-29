@@ -1044,6 +1044,162 @@ fn mime_from_ext(ext: &str) -> String {
     .to_string()
 }
 
+// ============ 模板系统（FR-CAP-08，v0.5）============
+
+#[derive(serde::Serialize)]
+pub struct TemplateInfo {
+    /// 模板文件名（含 .md）。
+    pub name: String,
+    /// vault 相对路径（templates/<name>）。
+    pub path: String,
+}
+
+/// 列 vault 的 templates/ 目录（不存在返回空）。
+#[tauri::command]
+pub fn list_templates() -> Result<Vec<TemplateInfo>, String> {
+    let dir = vault_root().join("templates");
+    let mut out: Vec<TemplateInfo> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".md") {
+                out.push(TemplateInfo {
+                    name: name.trim_end_matches(".md").to_string(),
+                    path: format!("templates/{name}"),
+                });
+            }
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// 渲染模板占位符（纯函数，便于单测）。未识别的 {{…}} 保留原样。
+fn render_template_placeholders(
+    tpl: &str,
+    title: &str,
+    now: chrono::DateTime<chrono::Utc>,
+) -> String {
+    let local = now.with_timezone(&chrono::Local);
+    s_matcher(
+        tpl,
+        &[
+            ("{{title}}", title),
+            ("{{date}}", &local.format("%Y-%m-%d").to_string()),
+            ("{{time}}", &local.format("%H:%M").to_string()),
+            ("{{datetime}}", &local.format("%Y-%m-%dT%H:%M").to_string()),
+        ],
+    )
+}
+
+/// 简单的按序字符串替换（每对全部替换）。
+fn s_matcher(s: &str, pairs: &[(&str, &str)]) -> String {
+    let mut out = s.to_string();
+    for (k, v) in pairs {
+        out = out.replace(k, v);
+    }
+    out
+}
+
+/// 从模板新建笔记：读模板 → 占位符替换 → 落 notes/<parent_dir>。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_note_from_template(
+    template_path: String,
+    title: String,
+    parent_dir: Option<String>,
+    indexer: State<'_, Arc<Indexer>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    use chrono::Utc;
+    // 模板路径防护：必须 templates/ 下
+    let tpl_rel = template_path.trim_start_matches('/');
+    if !tpl_rel.starts_with("templates/") || tpl_rel.contains("..") {
+        return Err(format!("invalid template path: {template_path}"));
+    }
+    let raw = tokio::fs::read_to_string(vault_root().join(tpl_rel))
+        .await
+        .map_err(|e| format!("read template failed: {e}"))?;
+    let content = render_template_placeholders(&raw, &title, Utc::now());
+    let dir = parent_dir.unwrap_or_else(|| "notes".into());
+
+    let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+    let slug: String = title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        id.rsplit_once('_')
+            .map(|(_, s)| s)
+            .unwrap_or("untitled")
+            .to_string()
+    } else {
+        slug
+    };
+    let date = Utc::now().format("%Y%m%d").to_string();
+    let path = format!("{dir}/{slug}-{date}.md");
+    // frontmatter 若模板没有 → 补最小 frontmatter；有则把 title/id 替换为本次
+    let final_text = if content.starts_with(
+        "---
+",
+    ) {
+        content.replacen(
+            "---
+",
+            &format!(
+                "---
+title: {title}
+id: {id}
+"
+            ),
+            1,
+        )
+    } else {
+        format!(
+            "---
+type: note
+id: {id}
+title: {title}
+created: {}
+---
+
+{content}",
+            Utc::now().format("%Y-%m-%dT%H:%M:%S+08:00")
+        )
+    };
+    let full = vault_root().join(&path);
+    if let Some(pp) = full.parent() {
+        tokio::fs::create_dir_all(pp)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &final_text)
+        .await
+        .map_err(|e| e.to_string())?;
+    // 索引（模板笔记同样应可检索）
+    if let Ok(c) = Concept::parse(&final_text) {
+        let _ = indexer.index_concept(&path, &final_text, &c).await;
+        let sqlite_c = sqlite.inner().clone();
+        let reg_c = registry.inner().clone();
+        let routing_c = routing.inner().clone();
+        let guard_c = guard_cfg.inner().clone();
+        let path_c = path.clone();
+        let text_c = final_text.clone();
+        tauri::async_runtime::spawn(async move {
+            let _ = lmnotes_core::indexer::generate_suggestions(
+                &c, &path_c, &sqlite_c, &reg_c, &routing_c, &guard_c, &text_c,
+            )
+            .await;
+        });
+    }
+    Ok(path)
+}
+
 // ============ 媒体任务队列（FR-MEDIA-04，v0.5）============
 
 /// 媒体任务 DTO（前端任务中心行）。
@@ -2269,8 +2425,47 @@ async fn download_attempt(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_extract_audio_cmd, parse_snapshot_ts, pick_preferred_model};
+    use super::{
+        build_extract_audio_cmd, parse_snapshot_ts, pick_preferred_model,
+        render_template_placeholders,
+    };
+    use chrono::TimeZone;
 
+    #[test]
+    fn template_placeholders_replace_all() {
+        use chrono::{Datelike, Timelike};
+        let now = chrono::Utc
+            .with_ymd_and_hms(2026, 8, 29, 14, 30, 0)
+            .unwrap();
+        // {{date}}/{{time}} 按本地时区渲染 → 期望值从同一时刻推导（时区无关）
+        let local = now.with_timezone(&chrono::Local);
+        let exp_date = format!("{}-{:02}-{:02}", local.year(), local.month(), local.day());
+        let exp_time = format!("{}:{:02}", local.hour(), local.minute());
+        let out = render_template_placeholders(
+            "# {{title}}
+
+日期 {{date}} 时间 {{time}} 完整 {{datetime}}
+{{title}} 复用",
+            "周会",
+            now,
+        );
+        assert!(out.contains("# 周会"));
+        assert!(out.contains(&format!("日期 {exp_date}")));
+        assert!(out.contains(&format!("时间 {exp_time}")));
+        assert!(out.contains(&format!("完整 {exp_date}T{exp_time}")));
+        assert_eq!(out.matches("周会").count(), 2);
+    }
+
+    #[test]
+    fn template_unknown_placeholder_preserved() {
+        let out =
+            render_template_placeholders("keep {{unknown}} and {{title}}", "T", chrono::Utc::now());
+        assert!(
+            out.contains("{{unknown}}"),
+            "unknown placeholder must survive"
+        );
+        assert!(out.contains("T"));
+    }
     #[test]
     fn extract_audio_cmd_drops_video_track() {
         // FR-CAP-04：视频转录必须 -vn 丢视频轨 + 16kHz 单声道 PCM
