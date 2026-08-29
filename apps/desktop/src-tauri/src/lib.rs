@@ -275,6 +275,8 @@ pub fn run() {
             commands::describe_image,
             commands::list_templates,
             commands::create_note_from_template,
+            commands::export_vault_zip,
+            commands::init_git_repo,
             commands::cancel_media_task,
             commands::retry_media_task,
             commands::enqueue_media_task,

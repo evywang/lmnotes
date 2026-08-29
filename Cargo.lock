@@ -130,6 +130,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
+name = "arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
+dependencies = [
+ "derive_arbitrary",
+]
+
+[[package]]
 name = "arc-swap"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -948,6 +957,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e567bd82dcff979e4b03460c307b3cdc9e96fde3d73bed1496d2bc75d9dd62a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -2663,7 +2683,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "lmnotes-cli"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2673,7 +2693,7 @@ dependencies = [
 
 [[package]]
 name = "lmnotes-core"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2700,7 +2720,7 @@ dependencies = [
 
 [[package]]
 name = "lmnotes-desktop"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "calamine",
@@ -2725,11 +2745,12 @@ dependencies = [
  "tauri-plugin-shell",
  "tempfile",
  "tokio",
+ "zip 2.4.2",
 ]
 
 [[package]]
 name = "lmnotes-mcp"
-version = "0.2.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -7092,6 +7113,23 @@ dependencies = [
  "crc32fast",
  "crossbeam-utils",
  "flate2",
+]
+
+[[package]]
+name = "zip"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fabe6324e908f85a1c52063ce7aa26b68dcb7eb6dbc83a2d148403c9bc3eba50"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "crossbeam-utils",
+ "displaydoc",
+ "flate2",
+ "indexmap 2.14.0",
+ "memchr",
+ "thiserror 2.0.18",
+ "zopfli",
 ]
 
 [[package]]

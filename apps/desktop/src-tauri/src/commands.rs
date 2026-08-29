@@ -18,6 +18,9 @@ use lmnotes_core::llm::{ChatMessage, ChatRequest, ChatRole};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
 use std::path::{Path, PathBuf};
+
+/// Windows 反斜杠（避免源码里写字面量转义）。
+const BS: char = '\u{005C}';
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -1042,6 +1045,121 @@ fn mime_from_ext(ext: &str) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
+}
+
+// ============ 数据导出（FR-STORE-05，v0.5）============
+
+/// 递归收集 vault 内需导出的相对路径（排除 .lmnotes/ 派生数据）。
+fn collect_export_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                // 跳过派生数据目录
+                if p.file_name().map(|n| n == ".lmnotes").unwrap_or(false) {
+                    continue;
+                }
+                collect_export_files(&p, out);
+            } else {
+                out.push(p);
+            }
+        }
+    }
+}
+
+/// 导出 vault 为 zip（流式，排除 .lmnotes/）。dest 为绝对路径。
+/// 返回写入的文件数。
+#[tauri::command]
+pub async fn export_vault_zip(dest: String, app: tauri::AppHandle) -> Result<u64, String> {
+    use tauri::Emitter;
+    let root = vault_root();
+    let mut files = Vec::new();
+    collect_export_files(&root, &mut files);
+    files.sort();
+    let out_path = PathBuf::from(&dest);
+    if let Some(pp) = out_path.parent() {
+        tokio::fs::create_dir_all(pp)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    // zip 写放阻塞线程
+    let root_c = root.clone();
+    let files_c = files.clone();
+    let dest_c = dest.clone();
+    let count = tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
+        let file = std::fs::File::create(&dest_c).map_err(|e| e.to_string())?;
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let total = files_c.len() as u64;
+        for (i, abs) in files_c.iter().enumerate() {
+            let rel = abs
+                .strip_prefix(&root_c)
+                .map_err(|e| e.to_string())?
+                .to_string_lossy()
+                .replace(BS, "/");
+            zip.start_file(&rel, opts).map_err(|e| e.to_string())?;
+            let mut f = std::fs::File::open(abs).map_err(|e| e.to_string())?;
+            std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
+            if i % 25 == 0 {
+                let _ = app.emit(
+                    "export-progress",
+                    serde_json::json!({ "done": i as u64, "total": total }),
+                );
+            }
+        }
+        zip.finish().map_err(|e| e.to_string())?;
+        Ok(total)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(count)
+}
+
+/// 在当前 vault 初始化 git 仓库（探测 git CLI；无则返回指引性错误）。
+/// init + .gitignore(.lmnotes/) + 首次提交（缺 user.name 时降级为仅 init）。
+#[tauri::command]
+pub async fn init_git_repo() -> Result<String, String> {
+    // 1) 探测 git
+    let probe = tokio::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .await;
+    let probe = match probe {
+        Ok(o) if o.status.success() => o,
+        _ => {
+            return Err("git not found in PATH. Install git first (git-scm.com).".into());
+        }
+    };
+    let _ = String::from_utf8_lossy(&probe.stdout);
+
+    let root = vault_root();
+    if root.join(".git").exists() {
+        return Err("this vault is already a git repository".into());
+    }
+    let gitignore = ".lmnotes/
+";
+    tokio::fs::write(root.join(".gitignore"), gitignore)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let run = |args: &[&str]| {
+        tokio::process::Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+    };
+    run(&["init"]).await.map_err(|e| e.to_string())?;
+    let _ = run(&["add", "-A"]).await;
+    match run(&["commit", "-m", "init: import existing notes"]).await {
+        Ok(o) if o.status.success() => {
+            Ok("git repository initialized with an initial commit".into())
+        }
+        _ => Ok(
+            "git repository initialized. Configure user.name/user.email to make the first commit."
+                .into(),
+        ),
+    }
 }
 
 // ============ 模板系统（FR-CAP-08，v0.5）============

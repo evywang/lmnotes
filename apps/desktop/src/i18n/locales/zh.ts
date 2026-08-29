@@ -140,6 +140,14 @@ export const zh: Record<MessageKey, string> = {
   "settings.transcribeModelPlaceholder": "如 whisper-1（填后启用语音输入）",
   "settings.visionModel": "视觉模型（可选）",
   "settings.visionModelPlaceholder": "如 gpt-4o-mini / llava（粘贴图片自动生成描述）",
+
+  // ── 数据导出 (FR-STORE-05) ────────────────────────────────────────────
+  "data.title": "数据",
+  "data.exportZip": "导出库为 ZIP",
+  "data.exportDialog": "导出库到",
+  "data.exportDone": "已导出 {n} 个文件。",
+  "data.gitInit": "初始化 git 仓库",
+  "data.hint": "ZIP 不含派生数据（.lmnotes/）。git init 会写入排除它的 .gitignore，配置好 git 身份后自动完成首次提交。",
   "settings.saving": "保存中…",
   "settings.save": "保存",
   "settings.cancel": "取消",

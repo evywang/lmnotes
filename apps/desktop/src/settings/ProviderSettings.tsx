@@ -2,6 +2,8 @@ import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { t, locale, setLocale } from "../i18n";
 import { LocalSttSetup } from "../voice/LocalSttSetup";
+import { save as saveDialog, message } from "@tauri-apps/plugin-dialog";
+import { APP_NAME } from "../components/PromptDialog";
 import { VaultSection } from "./VaultSection";
 
 interface ProviderRefSer {
@@ -238,6 +240,45 @@ export function ProviderSettings(props: { onClose: () => void }) {
               </div>
 
               <LocalSttSetup />
+
+              <div class="data-section">
+                <h3>{t("data.title")}</h3>
+                <div class="settings-actions" style={{ "justify-content": "flex-start" }}>
+                  <button
+                    class="btn-secondary"
+                    onClick={async () => {
+                      const dest = await saveDialog({
+                        title: t("data.exportDialog"),
+                        defaultPath: "lmnotes-vault.zip",
+                        filters: [{ name: "ZIP", extensions: ["zip"] }],
+                      });
+                      if (!dest || typeof dest !== "string") return;
+                      try {
+                        const n = await invoke<number>("export_vault_zip", { dest });
+                        void message(t("data.exportDone", { n }), { title: APP_NAME });
+                      } catch (e) {
+                        void message(String(e), { title: APP_NAME, kind: "error" });
+                      }
+                    }}
+                  >
+                    {t("data.exportZip")}
+                  </button>
+                  <button
+                    class="btn-secondary"
+                    onClick={async () => {
+                      try {
+                        const msg = await invoke<string>("init_git_repo");
+                        void message(msg, { title: APP_NAME });
+                      } catch (e) {
+                        void message(String(e), { title: APP_NAME, kind: "error" });
+                      }
+                    }}
+                  >
+                    {t("data.gitInit")}
+                  </button>
+                </div>
+                <p class="muted small">{t("data.hint")}</p>
+              </div>
 
               <div class="settings-actions">
                 <button class="btn-primary" onClick={save} disabled={saving()}>

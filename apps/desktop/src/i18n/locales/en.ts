@@ -139,6 +139,14 @@ export const en = {
   "settings.transcribeModelPlaceholder": "e.g. whisper-1 (enables voice input)",
   "settings.visionModel": "Vision Model (optional)",
   "settings.visionModelPlaceholder": "e.g. gpt-4o-mini / llava (describes pasted images)",
+
+  // ── Data export (FR-STORE-05) ─────────────────────────────────────────
+  "data.title": "Data",
+  "data.exportZip": "Export vault as ZIP",
+  "data.exportDialog": "Export vault to",
+  "data.exportDone": "Exported {n} files.",
+  "data.gitInit": "Initialize git repository",
+  "data.hint": "ZIP excludes derived data (.lmnotes/). git init adds a .gitignore for it and makes an initial commit when git identity is configured.",
   "settings.saving": "Saving…",
   "settings.save": "Save",
   "settings.cancel": "Cancel",

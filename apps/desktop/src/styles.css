@@ -1410,3 +1410,9 @@ body {
   display: flex;
   gap: 0.4rem;
 }
+
+.data-section {
+  border-top: 1px solid var(--border);
+  padding-top: 0.8rem;
+  margin-top: 0.8rem;
+}
