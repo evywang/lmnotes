@@ -86,6 +86,8 @@ export const en = {
   "editor.extractActions": "✅ Extract action items",
   "editor.extractBusy": "Extracting…",
   "editor.extractTooltip": "Extract action items from this transcript/meeting note",
+  "editor.mediaTranscribing": "Transcribing dropped media…",
+  "editor.mediaFailed": "Media transcription failed: ",
 
   // ── History panel (FR-LLM-09) ─────────────────────────────────────────
   "history.empty": "No snapshots yet. Snapshots are taken before each LLM rewrite.",

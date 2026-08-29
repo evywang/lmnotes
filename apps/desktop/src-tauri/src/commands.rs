@@ -708,6 +708,113 @@ async fn transcribe_with_fallback(
     })
 }
 
+/// 共享：转录产物 → transcript concept 落盘 → 索引 + 后台建议。
+/// voice（create_voice_note）与 media（create_media_note）同构复用（FR-CAP-04）。
+#[allow(clippy::too_many_arguments)]
+async fn build_and_write_transcript(
+    asset_rel: String,
+    transcript_text: &str,
+    provider_id: &str,
+    mime: &str,
+    duration_ms: Option<u64>,
+    language: Option<String>,
+    title: Option<String>,
+    id_slug: &str,
+    indexer: &State<'_, Arc<Indexer>>,
+    sqlite: &State<'_, Arc<SqliteIndex>>,
+    registry: &State<'_, Arc<Registry>>,
+    routing: &State<'_, Arc<Routing>>,
+    guard_cfg: &State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    use chrono::Utc;
+    use lmnotes_core::id::new_resource_id;
+    use lmnotes_core::okf::concept::Concept;
+    use lmnotes_core::okf::frontmatter::Frontmatter;
+    use std::collections::BTreeMap;
+
+    let now = Utc::now();
+    let ts_display = now.format("%Y-%m-%d %H:%M").to_string();
+    let title = title.unwrap_or_else(|| format!("Media transcript {ts_display}"));
+    let mut extra = BTreeMap::new();
+    if let Some(ms) = duration_ms {
+        extra.insert("duration_ms".into(), serde_yaml::Value::Number(ms.into()));
+    }
+    extra.insert("mime".into(), serde_yaml::Value::String(mime.to_string()));
+    extra.insert(
+        "transcribed_by".into(),
+        serde_yaml::Value::String(provider_id.to_string()),
+    );
+    let fm = Frontmatter {
+        type_: "transcript".into(),
+        title: Some(title.clone()),
+        description: None,
+        resource: Some(asset_rel),
+        tags: vec![id_slug.to_string()],
+        timestamp: Some(now),
+        id: Some(new_resource_id(id_slug)),
+        aliases: vec![],
+        status: None,
+        language,
+        created: Some(now),
+        extra,
+    };
+    let body = format!(
+        "# {title}
+
+{}
+",
+        transcript_text.trim()
+    );
+    let concept = Concept {
+        frontmatter: fm,
+        body,
+    };
+    let text = concept.to_string();
+
+    let slug: String = title
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(30)
+        .collect::<String>()
+        .to_lowercase();
+    let slug = if slug.is_empty() {
+        id_slug.to_string()
+    } else {
+        slug
+    };
+    let date = now.format("%Y%m%d").to_string();
+    let path = format!("transcripts/{slug}-{date}.md");
+    let full = vault_root().join(&path);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &text)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
+        eprintln!("transcript note index fail {path}: {e}");
+    }
+    let sqlite_c = sqlite.inner().clone();
+    let reg_c = registry.inner().clone();
+    let routing_c = routing.inner().clone();
+    let guard_c = guard_cfg.inner().clone();
+    let path_c = path.clone();
+    let text_c = text.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = lmnotes_core::indexer::generate_suggestions(
+            &concept, &path_c, &sqlite_c, &reg_c, &routing_c, &guard_c, &text_c,
+        )
+        .await
+        {
+            eprintln!("transcript suggestion fail {path_c}: {e}");
+        }
+    });
+    Ok(path)
+}
+
 /// 1) 音频 SHA-256 去重归档到 assets/audio/
 /// 2) 经路由取 transcribe provider（云端 Whisper 兼容）
 /// 3) 过三层护栏（音频不可字符串扫描，仅 cloud_allowed + local_only 闸）
@@ -729,16 +836,11 @@ pub async fn create_voice_note(
     routing: State<'_, Arc<Routing>>,
     guard_cfg: State<'_, Arc<GuardConfig>>,
 ) -> Result<String, String> {
-    use chrono::Utc;
-    use lmnotes_core::id::new_resource_id;
     use lmnotes_core::llm::provider::AudioInput;
-    use lmnotes_core::okf::concept::Concept;
-    use lmnotes_core::okf::frontmatter::Frontmatter;
-    use std::collections::BTreeMap;
+    let id_slug = "voice"; // tags/id 前缀（media 流程用 "media"）
 
     // 1) 归档音频
     let (asset_rel, hash) = archive_binary(&audio, &ext, "audio").await?;
-    let now = Utc::now();
 
     // 2-4) 转录（含云端失败→本地 whisper.cpp 自动降级，ADR-0007）。
     // 返回 (Transcript, provider_id)——provider_id 写进 frontmatter 的 transcribed_by，
@@ -758,85 +860,149 @@ pub async fn create_voice_note(
     )
     .await?;
 
-    // 5) 构建 transcript concept（PRD §3.5 完整形态）
-    let ts_display = now.format("%Y-%m-%d %H:%M").to_string();
-    let title = title.unwrap_or_else(|| format!("Voice note {ts_display}"));
-    let mut extra = BTreeMap::new();
-    extra.insert(
-        "duration_ms".into(),
-        serde_yaml::Value::Number(duration_ms.into()),
-    );
-    extra.insert("mime".into(), serde_yaml::Value::String(mime_for_meta));
-    extra.insert(
-        "transcribed_by".into(),
-        serde_yaml::Value::String(provider_id.clone()),
-    );
-    let fm = Frontmatter {
-        type_: "transcript".into(),
-        title: Some(title.clone()),
-        description: None,
-        resource: Some(asset_rel),
-        tags: vec!["voice".into()],
-        timestamp: Some(now),
-        id: Some(new_resource_id("voice")),
-        aliases: vec![],
-        status: None,
+    // 5-7) 共享：构建/落盘/索引 transcript concept（voice 与 media 同构）
+    build_and_write_transcript(
+        asset_rel,
+        &tr.text,
+        &provider_id,
+        &mime_for_meta,
+        Some(duration_ms),
         language,
-        created: Some(now),
-        extra,
-    };
-    let body = format!("# {title}\n\n{}\n", tr.text.trim());
-    let concept = Concept {
-        frontmatter: fm,
-        body,
-    };
-    let text = concept.to_string();
+        title,
+        id_slug,
+        &indexer,
+        &sqlite,
+        &registry,
+        &routing,
+        &guard_cfg,
+    )
+    .await
+}
 
-    // 6) 写 transcripts/<slug>-<YYYYMMDD>.md（slug 逻辑同 create_note）
-    let slug: String = title
-        .chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-        .take(30)
-        .collect::<String>()
-        .to_lowercase();
-    let slug = if slug.is_empty() {
-        "voice".to_string()
-    } else {
-        slug
+/// 媒体文件转转录笔记（FR-CAP-04）：拖拽/粘贴的音频或视频文件。
+/// 音频：归档后直接转录（与 voice 同路径）。
+/// 视频：归档到 assets/video/ → ffmpeg sidecar 抽 16kHz mono 音轨（-vn）→ 转录。
+/// resource 指向原始媒体；tags/id 用 "media"（与 voice 流程区分）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn create_media_note(
+    data: Vec<u8>,
+    ext: String,
+    mime: String,
+    kind: String, // "audio" | "video"
+    duration_ms: Option<u64>,
+    language: Option<String>,
+    title: Option<String>,
+    indexer: State<'_, Arc<Indexer>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    use lmnotes_core::llm::provider::AudioInput;
+    let id_slug = "media";
+
+    // 1) 归档原始媒体（audio → assets/audio/，video → assets/video/）
+    let kind_dir = match kind.as_str() {
+        "audio" => "audio",
+        "video" => "video",
+        other => return Err(format!("unsupported media kind: {other}")),
     };
-    let date = now.format("%Y%m%d").to_string();
-    let path = format!("transcripts/{slug}-{date}.md");
-    let full = vault_root().join(&path);
-    if let Some(p) = full.parent() {
-        tokio::fs::create_dir_all(p)
+    let (asset_rel, hash) = archive_binary(&data, &ext, kind_dir).await?;
+
+    // 2) 视频先抽音轨：ffmpeg -i in -vn -ar 16000 -ac 1 pcm wav
+    let audio_bytes: Vec<u8>;
+    let audio_mime: String;
+    let audio_ext: String;
+    if kind == "video" {
+        let ffmpeg = ffmpeg_binary_path().ok_or_else(|| {
+            "video transcription requires the ffmpeg sidecar (not found)".to_string()
+        })?;
+        let src = vault_root().join(asset_rel.trim_start_matches('/'));
+        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let wav = tmp.path().join("audio.wav");
+        extract_audio_track(&ffmpeg, &src, &wav).await?;
+        audio_bytes = tokio::fs::read(&wav)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("read extracted audio failed: {e}"))?;
+        audio_mime = "audio/wav".into();
+        audio_ext = "wav".into();
+    } else {
+        audio_bytes = data;
+        audio_mime = mime.clone();
+        audio_ext = ext.clone();
     }
-    tokio::fs::write(&full, &text)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    // 7) 增量索引 + 后台 LLM 建议（复刻 lib.rs watcher 分支）
-    if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
-        eprintln!("voice note index fail {path}: {e}");
+    if audio_bytes.is_empty() {
+        return Err("no audio track found in media file".into());
     }
-    let sqlite_c = sqlite.inner().clone();
-    let reg_c = registry.inner().clone();
-    let routing_c = routing.inner().clone();
-    let guard_c = guard_cfg.inner().clone();
-    let path_c = path.clone();
-    let text_c = text.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = lmnotes_core::indexer::generate_suggestions(
-            &concept, &path_c, &sqlite_c, &reg_c, &routing_c, &guard_c, &text_c,
-        )
-        .await
-        {
-            eprintln!("voice note suggestion fail {path_c}: {e}");
-        }
-    });
 
-    Ok(path)
+    // 3) 转录（云优先/本地兜底/护栏，与 voice 一致）
+    let filename = format!("{hash}.{audio_ext}");
+    let mime_for_meta = mime.clone(); // frontmatter 记原始 mime
+    let (tr, provider_id) = transcribe_with_fallback(
+        &registry,
+        &routing,
+        &guard_cfg,
+        AudioInput {
+            bytes: audio_bytes,
+            mime: audio_mime,
+            filename,
+        },
+        language.as_deref(),
+    )
+    .await?;
+
+    // 4-6) 共享 builder（resource 指原始媒体、duration 可空、tags=media）
+    build_and_write_transcript(
+        asset_rel,
+        &tr.text,
+        &provider_id,
+        &mime_for_meta,
+        duration_ms,
+        language,
+        title,
+        id_slug,
+        &indexer,
+        &sqlite,
+        &registry,
+        &routing,
+        &guard_cfg,
+    )
+    .await
+}
+
+/// 构造 ffmpeg 抽音轨命令（纯函数便于单测参数拼装）。
+/// `ffmpeg -y -i <in> -vn -ar 16000 -ac 1 -c:a pcm_s16le <out>`
+fn build_extract_audio_cmd(ffmpeg: &Path, input: &Path, out: &Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(ffmpeg);
+    cmd.arg("-y")
+        .arg("-i")
+        .arg(input)
+        .arg("-vn") // 丢视频轨——视频转录的关键差异
+        .arg("-ar")
+        .arg("16000")
+        .arg("-ac")
+        .arg("1")
+        .arg("-c:a")
+        .arg("pcm_s16le")
+        .arg(out);
+    cmd
+}
+
+/// ffmpeg 抽音轨（参数见 build_extract_audio_cmd）。
+async fn extract_audio_track(ffmpeg: &Path, input: &Path, out: &Path) -> Result<(), String> {
+    let output = build_extract_audio_cmd(ffmpeg, input, out)
+        .output()
+        .await
+        .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ffmpeg audio extraction failed: {}",
+            stderr.chars().take(400).collect::<String>()
+        ));
+    }
+    Ok(())
 }
 
 /// 导入 .md 文件：把外部文件复制到 vault，自动生成 frontmatter（若无）。
@@ -1805,7 +1971,21 @@ async fn download_attempt(
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_snapshot_ts, pick_preferred_model};
+    use super::{build_extract_audio_cmd, parse_snapshot_ts, pick_preferred_model};
+
+    #[test]
+    fn extract_audio_cmd_drops_video_track() {
+        // FR-CAP-04：视频转录必须 -vn 丢视频轨 + 16kHz 单声道 PCM
+        let cmd = build_extract_audio_cmd(
+            std::path::Path::new("ffmpeg"),
+            std::path::Path::new("in.mp4"),
+            std::path::Path::new("out.wav"),
+        );
+        let dbg = format!("{cmd:?}");
+        for needle in ["-vn", "16000", "pcm_s16le", "in.mp4", "out.wav"] {
+            assert!(dbg.contains(needle), "cmd missing {needle:?}: {dbg}");
+        }
+    }
 
     #[test]
     fn snapshot_ts_parses_valid_suffix() {

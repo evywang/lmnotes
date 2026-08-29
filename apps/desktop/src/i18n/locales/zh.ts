@@ -87,6 +87,8 @@ export const zh: Record<MessageKey, string> = {
   "editor.extractActions": "✅ 抽取行动项",
   "editor.extractBusy": "抽取中…",
   "editor.extractTooltip": "从此转录/会议笔记抽取行动项",
+  "editor.mediaTranscribing": "正在转录拖入的媒体…",
+  "editor.mediaFailed": "媒体转录失败：",
 
   // ── 历史版本面板 (FR-LLM-09) ──────────────────────────────────────────
   "history.empty": "暂无快照。每次 LLM 改写前会自动保存快照。",

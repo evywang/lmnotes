@@ -13,13 +13,14 @@ interface ConceptFile {
   text: string;
 }
 
-export function Editor(props: { path: string }) {
+export function Editor(props: { path: string; onNavigate?: (path: string) => void }) {
   let host: HTMLDivElement | undefined;
   const [content, setContent] = createSignal("");
   const [loaded, setLoaded] = createSignal(false);
   const [dirty, setDirty] = createSignal(false);
   const [preview, setPreview] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [mediaBusy, setMediaBusy] = createSignal(false); // 音视频转录中（FR-CAP-04）
   const [extracting, setExtracting] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let viewGetter = () => undefined as EditorView | undefined;
@@ -88,9 +89,38 @@ export function Editor(props: { path: string }) {
 
   const handleFiles = async (files: FileList) => {
     for (const f of Array.from(files)) {
-      if (!f.type.startsWith("image/")) continue;
       const buf = new Uint8Array(await f.arrayBuffer());
-      const ext = f.name.split(".").pop() || "png";
+      const ext = f.name.split(".").pop() || "bin";
+
+      // 音视频 → 归档 + 转录成 transcript 笔记（FR-CAP-04）
+      if (f.type.startsWith("audio/") || f.type.startsWith("video/")) {
+        const kind = f.type.startsWith("video/") ? "video" : "audio";
+        setMediaBusy(true);
+        try {
+          const path = await invoke<string>("create_media_note", {
+            data: Array.from(buf),
+            ext,
+            mime: f.type,
+            kind,
+            durationMs: null,
+            language: null,
+            title: null,
+          });
+          props.onNavigate?.(path);
+        } catch (e) {
+          console.error("create_media_note failed", e);
+          void message(`${t("editor.mediaFailed")}${e}`, {
+            title: APP_NAME,
+            kind: "error",
+          });
+        } finally {
+          setMediaBusy(false);
+        }
+        continue;
+      }
+
+      // 图片 → 归档 + 插入链接（原有路径）
+      if (!f.type.startsWith("image/")) continue;
       try {
         const rel = await invoke<string>("insert_image", {
           data: Array.from(buf),
@@ -127,6 +157,9 @@ export function Editor(props: { path: string }) {
         <span class="editor-path">{props.path}</span>
         <Show when={dirty()}>
           <span class="dirty-dot">●</span>
+        </Show>
+        <Show when={mediaBusy()}>
+          <span class="muted small">🎙 {t("editor.mediaTranscribing")}</span>
         </Show>
         <Show when={canExtractActions()}>
           <button
