@@ -41,6 +41,7 @@
 | [0005](ADR-0005-llm-provider-guardrails.md) | LLM Provider 抽象与隐私护栏 | Accepted (rev1: F7 能力门控trait) | 2026-06-21 |
 | [0006](ADR-0006-voice-transcription.md) | 语音转录（云端 Whisper 优先） | Accepted | 2026-07-12 |
 | [0007](ADR-0007-local-stt-fallback.md) | 本地 STT 降级（whisper.cpp sidecar） | Accepted | 2026-07-21 |
+| [0008](ADR-0008-multi-vault-restart-switch.md) | 多 Vault 与重启式切换 | Accepted | 2026-08-29 |
 
 ## 与 PRD 的关系
 - PRD `docs/specs/PRD.md` §15 决策（O1–O6）是这些 ADR 的输入。

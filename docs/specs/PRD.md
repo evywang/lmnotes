@@ -253,7 +253,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 ### 5.1 OKF 存储与 Vault 管理（域：STORE）
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-STORE-01 | 创建/打开/切换多个 Vault（每个 Vault = 一个本地目录） | MVP |
+| FR-STORE-01 | 创建/打开/切换多个 Vault（每个 Vault = 一个本地目录）（✅ v0.4.0 已实现：重启式切换，[ADR-0008](../adr/ADR-0008-multi-vault-restart-switch.md)） | MVP |
 | FR-STORE-02 | 读写符合 §3.3 的笔记文件；frontmatter 字段强校验，损坏文件只读保护不丢数据 | MVP |
 | FR-STORE-03 | 资源文件 SHA-256 去重存储；引用通过相对路径 | MVP |
 | FR-STORE-04 | 文件系统实时监听（vault 目录被外部编辑能感知并重建增量索引） | P1 |
@@ -266,7 +266,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-CAP-01 | 全局快捷键唤起"快速捕获"浮窗（桌面端），支持文本/语音 | MVP |
 | FR-CAP-02 | 所见即所写 Markdown 编辑器（CommonMark + GFM：表格/任务列表/脚注/数学） | MVP |
 | FR-CAP-03 | 实时双向链接补全：键入 `[](` 时按 title/alias/id 补全为目标 concept 的 OKF 路径链接（✅ v0.3.0 已实现：`[` 触发，title/alias/路径补全） | MVP |
-| FR-CAP-04 | 拖拽 / 粘贴 / 选择文件 添加图片、音频、视频；自动落 `assets/` 并生成对应描述 concept（§3.5） | MVP |
+| FR-CAP-04 | 拖拽 / 粘贴 / 选择文件 添加图片、音频、视频；自动落 `assets/` 并生成对应描述 concept（§3.5）（✅ v0.4.0：图片描述 + 音视频自动转录） | MVP |
 | FR-CAP-05 | 语音输入：按住说话 / 流式转录，可选用本地 Whisper 或云端（✅ MVP 已实现点按录音+云端 Whisper 批量转录，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)；push-to-talk/流式/本地引擎留 P1） | MVP |
 | FR-CAP-06 | 移动端"速记"入口（下拉通知/小组件/Share Sheet 接收外部分享） | P1 |
 | FR-CAP-07 | 块级拖拽、折叠、列表大纲模式 | P1 |
@@ -277,7 +277,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | ID | 需求 | 优先级 |
 |---|---|---|
 | FR-MEDIA-01 | 音频自动转录（Whisper 兼容引擎），转录稿写入 `type: transcript` 的描述 concept（§3.5）（✅ MVP 已实现，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)） | MVP |
-| FR-MEDIA-02 | 图片 OCR + 视觉描述（多模态 LLM 或专用模型） | P1 |
+| FR-MEDIA-02 | 图片 OCR + 视觉描述（多模态 LLM 或专用模型）（✅ v0.4.0 已实现：VisionCap + image-desc concept） | P1 |
 | FR-MEDIA-03 | 视频抽关键帧 + 转录音轨；关键帧索引化 | P2 |
 | FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑 | MVP |
 | FR-MEDIA-05 | 处理引擎可插拔（本地 whisper.cpp / 云端 API）（✅ 已实现：云端 Whisper + 本地 whisper.cpp sidecar，运行时自动降级，见 [ADR-0007](../adr/ADR-0007-local-stt-fallback.md)） | P1 |

@@ -92,7 +92,7 @@ cargo run -p lmnotes-cli -- --help
 | [OKF 规范 v0.1](docs/okf/SPEC.v0.1.md) | LMNotes 遵循的开放知识格式(本地存档) |
 | [MCP Agent 接入指南](docs/mcp-agent-integration.md) | 让 Claude/Cursor 等 host 读写你的 vault |
 | [MCP API 参考](docs/mcp-api.md) | MCP server 工具清单与协议细节 |
-| [架构决策记录 (ADR)](docs/adr/) | 7 篇 ADR:核心边界、三层索引、前端栈、Provider 护栏、语音转录、本地 STT 降级 |
+| [架构决策记录 (ADR)](docs/adr/) | 8 篇 ADR:核心边界、三层索引、前端栈、Provider 护栏、语音转录、本地 STT、多库 |
 
 ## 🏗️ 架构
 
