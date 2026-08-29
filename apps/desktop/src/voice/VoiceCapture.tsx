@@ -54,10 +54,14 @@ export function VoiceCapture(props: {
   window.addEventListener("keydown", onKeydown);
   onCleanup(() => window.removeEventListener("keydown", onKeydown));
 
+  // push-to-talk：async 授权期间可能已松手——记 flag，recorder 就绪即丢弃（零时长）。
+  let releasedBeforeReady = false;
+
   const start = async () => {
     setError(null);
     setNeedsLocalSetup(false);
     cancelled = false;
+    releasedBeforeReady = false;
     setSeconds(0);
     chunks = [];
     let stream: MediaStream;
@@ -65,6 +69,10 @@ export function VoiceCapture(props: {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
       setError(t("voice.permissionDenied"));
+      return;
+    }
+    if (releasedBeforeReady) {
+      stream.getTracks().forEach((tr) => tr.stop());
       return;
     }
     // MediaRecorder 默认产出 webm/opus（OpenAI Whisper 接受）；Safari 走 mp4
@@ -92,6 +100,8 @@ export function VoiceCapture(props: {
     setRecording(false);
     if (recorder && recorder.state !== "inactive") {
       recorder.stop(); // 触发 onstop → transcribe
+    } else {
+      releasedBeforeReady = true; // recorder 未就绪即松手：start() 侧丢弃
     }
   };
 
@@ -169,8 +179,18 @@ export function VoiceCapture(props: {
               </button>
             }
           >
-            <button class="voice-record-btn" onClick={start}>
-              ● {t("voice.start")}
+            <button
+              class="voice-record-btn voice-ptt"
+              onPointerDown={(e) => {
+                e.preventDefault(); // 防聚焦/选中
+                void start();
+              }}
+              onPointerUp={stop}
+              onPointerLeave={() => recording() && stop()}
+              onPointerCancel={stop}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              ● {t("voice.holdToRecord")}
             </button>
           </Show>
         </Show>

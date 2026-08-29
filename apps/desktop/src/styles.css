@@ -1321,3 +1321,15 @@ body {
 .vault-badge:hover {
   border-color: var(--accent);
 }
+
+/* 按住说话（push-to-talk）：按住期间禁选中 */
+.voice-ptt {
+  user-select: none;
+  touch-action: none;
+}
+
+/* 按住说话（push-to-talk） */
+.voice-ptt {
+  user-select: none;
+  touch-action: none;
+}

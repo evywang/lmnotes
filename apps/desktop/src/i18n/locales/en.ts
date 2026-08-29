@@ -44,6 +44,7 @@ export const en = {
   // ── Voice input (FR-CAP-05) ───────────────────────────────────────────
   "voice.title": "🎤 Voice Note",
   "voice.start": "Start recording",
+  "voice.holdToRecord": "Hold to record",
   "voice.recording": "● Recording… {sec}s (click to stop)",
   "voice.processing": "Transcribing…",
   "voice.permissionDenied": "Microphone permission denied.",

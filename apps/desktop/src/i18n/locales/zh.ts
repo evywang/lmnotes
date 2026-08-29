@@ -45,6 +45,7 @@ export const zh: Record<MessageKey, string> = {
   // ── 语音输入 (FR-CAP-05) ──────────────────────────────────────────────
   "voice.title": "🎤 语音笔记",
   "voice.start": "开始录音",
+  "voice.holdToRecord": "按住说话",
   "voice.recording": "● 录音中… {sec}s（点击停止）",
   "voice.processing": "转录中…",
   "voice.permissionDenied": "已拒绝麦克风权限。",
