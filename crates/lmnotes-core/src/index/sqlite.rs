@@ -1,8 +1,8 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
 use super::schema::{
-    create_vec_sql, ConceptRow, EdgeRow, ALTER_CONCEPTS_ALIASES, CREATE_CHAT_HISTORY,
-    CREATE_CONCEPTS, CREATE_EDGES, CREATE_SUGGESTIONS,
+    create_vec_sql, ConceptRow, EdgeRow, MediaTask, ALTER_CONCEPTS_ALIASES, CREATE_CHAT_HISTORY,
+    CREATE_CONCEPTS, CREATE_EDGES, CREATE_MEDIA_TASKS, CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -369,7 +369,7 @@ impl SqliteIndex {
     pub async fn init_schema_with_vec_dim(&self, dim: usize) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!(
-            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}"
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}\n{CREATE_MEDIA_TASKS}"
         ))?;
         // 老库迁移：补 aliases 列（v0.3 FR-CAP-03）。已有该列时 ALTER 报
         // duplicate column，容忍跳过（新库 CREATE 已含，同样会走到这里）。
@@ -516,6 +516,110 @@ impl SqliteIndex {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM chat_history", [])?;
         Ok(())
+    }
+
+    // ── 媒体任务（FR-MEDIA-04，v0.5）────────────────────────────────────
+
+    pub fn insert_media_task(&self, t: &MediaTask) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO media_tasks (id, kind, asset_rel, mime, duration_ms, language, status, error, result_path, created_at, updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+            rusqlite::params![
+                t.id, t.kind, t.asset_rel, t.mime, t.duration_ms, t.language, t.status,
+                t.error, t.result_path, t.created_at, t.updated_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_media_task_status(
+        &self,
+        id: &str,
+        status: &str,
+        error: Option<&str>,
+        result_path: Option<&str>,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE media_tasks SET status=?2, error=?3, result_path=?4, updated_at=?5 WHERE id=?1",
+            rusqlite::params![
+                id,
+                status,
+                error,
+                result_path,
+                chrono::Utc::now().timestamp()
+            ],
+        )?;
+        Ok(())
+    }
+
+    fn media_task_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<MediaTask> {
+        Ok(MediaTask {
+            id: row.get(0)?,
+            kind: row.get(1)?,
+            asset_rel: row.get(2)?,
+            mime: row.get(3)?,
+            duration_ms: row.get(4)?,
+            language: row.get(5)?,
+            status: row.get(6)?,
+            error: row.get(7)?,
+            result_path: row.get(8)?,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        })
+    }
+
+    const MEDIA_TASK_COLS: &str =
+        "id, kind, asset_rel, mime, duration_ms, language, status, error, result_path, created_at, updated_at";
+
+    /// 列任务；status 为 None 列全部（新→旧）。
+    pub fn list_media_tasks(&self, status: Option<&str>) -> crate::Result<Vec<MediaTask>> {
+        let conn = self.conn.lock().unwrap();
+        let sql = match status {
+            Some(_) => format!(
+                "SELECT {0} FROM media_tasks WHERE status=?1 ORDER BY created_at DESC, id DESC",
+                Self::MEDIA_TASK_COLS
+            ),
+            None => format!(
+                "SELECT {0} FROM media_tasks ORDER BY created_at DESC, id DESC",
+                Self::MEDIA_TASK_COLS
+            ),
+        };
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = match status {
+            Some(st) => stmt
+                .query_map([st], Self::media_task_from)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            None => stmt
+                .query_map([], Self::media_task_from)?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+        };
+        Ok(rows)
+    }
+
+    /// 崩溃/退出恢复：所有 running 重置为 pending（worker 启动兜底）。
+    pub fn reset_running_media_tasks(&self) -> crate::Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            "UPDATE media_tasks SET status='pending', updated_at=?1 WHERE status='running'",
+            rusqlite::params![chrono::Utc::now().timestamp()],
+        )?;
+        Ok(n as u64)
+    }
+
+    /// 拉取待处理任务（FIFO：created_at 升序），limit 条。
+    pub fn pending_media_tasks(&self, limit: usize) -> crate::Result<Vec<MediaTask>> {
+        let conn = self.conn.lock().unwrap();
+        let sql = format!(
+            "SELECT {0} FROM media_tasks WHERE status='pending' ORDER BY created_at ASC, id ASC LIMIT ?1",
+            Self::MEDIA_TASK_COLS
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map([limit as i64], Self::media_task_from)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 }
 
@@ -676,6 +780,73 @@ mod tests {
         let hits = filter_titles(&sample_rows(), "daily", 20);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].id, "nt_3");
+    }
+
+    fn media_task(id: &str, status: &str, created: i64) -> MediaTask {
+        MediaTask {
+            id: id.into(),
+            kind: "transcribe".into(),
+            asset_rel: "/assets/audio/aa/hash.webm".into(),
+            mime: "audio/webm".into(),
+            duration_ms: Some(30_000),
+            language: None,
+            status: status.into(),
+            error: None,
+            result_path: None,
+            created_at: created,
+            updated_at: created,
+        }
+    }
+
+    #[tokio::test]
+    async fn media_task_crud_round_trip() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.insert_media_task(&media_task("mt_1", "pending", 100))
+            .unwrap();
+
+        // 状态迁移 + result_path
+        idx.update_media_task_status("mt_1", "running", None, None)
+            .unwrap();
+        idx.update_media_task_status("mt_1", "done", None, Some("transcripts/x.md"))
+            .unwrap();
+
+        let all = idx.list_media_tasks(None).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].status, "done");
+        assert_eq!(all[0].result_path.as_deref(), Some("transcripts/x.md"));
+        assert!(all[0].updated_at >= all[0].created_at);
+    }
+
+    #[tokio::test]
+    async fn media_task_list_filters_by_status_and_orders() {
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.insert_media_task(&media_task("mt_a", "pending", 300))
+            .unwrap();
+        idx.insert_media_task(&media_task("mt_b", "pending", 100))
+            .unwrap();
+        idx.insert_media_task(&media_task("mt_c", "done", 200))
+            .unwrap();
+
+        // pending-only：2 条
+        let pending = idx.list_media_tasks(Some("pending")).unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending.iter().all(|t| t.status == "pending"));
+        // 全量按 created_at 降序：mt_a(300) → mt_c(200) → mt_b(100)
+        let all = idx.list_media_tasks(None).unwrap();
+        assert_eq!(
+            all.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["mt_a", "mt_c", "mt_b"]
+        );
+        // pending FIFO（升序）：mt_b → mt_a
+        let fifo = idx.pending_media_tasks(10).unwrap();
+        assert_eq!(
+            fifo.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+            ["mt_b", "mt_a"]
+        );
+        // limit 生效
+        assert_eq!(idx.pending_media_tasks(1).unwrap().len(), 1);
     }
 
     #[test]

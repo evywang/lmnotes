@@ -2,6 +2,7 @@
 
 mod commands;
 mod llm_config;
+mod media_tasks;
 pub mod whisper_cpp;
 
 use lmnotes_core::backend::fs::FsBackend;
@@ -229,6 +230,15 @@ pub fn run() {
         None
     };
 
+    // 媒体任务 worker 依赖（在 manage() 移动 Arc 之前克隆）
+    let worker_deps = media_tasks::WorkerDeps {
+        indexer: indexer.clone(),
+        sqlite: meta.clone(),
+        registry: registry.clone(),
+        routing: routing.clone(),
+        guard_cfg: guard_cfg.clone(),
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -242,6 +252,12 @@ pub fn run() {
         .manage(guard_cfg.clone())
         .manage(HoldWatcher(watcher))
         .manage(mcp_hold)
+        .setup(move |app| {
+            let worker_deps = worker_deps;
+            // 媒体任务后台 worker（v0.5 FR-MEDIA-04）：running→pending 兜底 + 常驻循环
+            media_tasks::spawn_worker(app.handle().clone(), worker_deps);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::search,
@@ -257,6 +273,10 @@ pub fn run() {
             commands::create_voice_note,
             commands::create_media_note,
             commands::describe_image,
+            commands::cancel_media_task,
+            commands::retry_media_task,
+            commands::enqueue_media_task,
+            commands::list_media_tasks,
             commands::list_suggestions,
             commands::accept_suggestion,
             commands::reject_suggestion,

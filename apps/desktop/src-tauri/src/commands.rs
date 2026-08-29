@@ -54,7 +54,7 @@ pub fn list_note_titles(
 }
 
 /// 当前 vault 目录（v0.4 多库：config.last_vault → 回退 ~/.lmnotes/default，进程内缓存）。
-fn vault_root() -> PathBuf {
+pub(crate) fn vault_root() -> PathBuf {
     crate::llm_config::current_vault()
 }
 
@@ -680,7 +680,7 @@ pub async fn create_note(title: String, parent_dir: Option<String>) -> Result<St
 /// 核心降级逻辑（候选顺序、护栏、网络错误识别、降级判定）在
 /// `lmnotes_core::llm::transcribe_fallback`，有完整单测覆盖。
 /// 壳层仅负责 String 错误转换（Tauri 命令返回 `Result<_, String>`）与降级日志。
-async fn transcribe_with_fallback(
+pub(crate) async fn transcribe_with_fallback(
     registry: &Registry,
     routing: &Routing,
     guard_cfg: &GuardConfig,
@@ -711,7 +711,7 @@ async fn transcribe_with_fallback(
 /// 共享：转录产物 → transcript concept 落盘 → 索引 + 后台建议。
 /// voice（create_voice_note）与 media（create_media_note）同构复用（FR-CAP-04）。
 #[allow(clippy::too_many_arguments)]
-async fn build_and_write_transcript(
+pub(crate) async fn build_and_write_transcript(
     asset_rel: String,
     transcript_text: &str,
     provider_id: &str,
@@ -720,11 +720,11 @@ async fn build_and_write_transcript(
     language: Option<String>,
     title: Option<String>,
     id_slug: &str,
-    indexer: &State<'_, Arc<Indexer>>,
-    sqlite: &State<'_, Arc<SqliteIndex>>,
-    registry: &State<'_, Arc<Registry>>,
-    routing: &State<'_, Arc<Routing>>,
-    guard_cfg: &State<'_, Arc<GuardConfig>>,
+    indexer: &Arc<Indexer>,
+    sqlite: &Arc<SqliteIndex>,
+    registry: &Arc<Registry>,
+    routing: &Arc<Routing>,
+    guard_cfg: &Arc<GuardConfig>,
 ) -> Result<String, String> {
     use chrono::Utc;
     use lmnotes_core::id::new_resource_id;
@@ -797,10 +797,10 @@ async fn build_and_write_transcript(
     if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
         eprintln!("transcript note index fail {path}: {e}");
     }
-    let sqlite_c = sqlite.inner().clone();
-    let reg_c = registry.inner().clone();
-    let routing_c = routing.inner().clone();
-    let guard_c = guard_cfg.inner().clone();
+    let sqlite_c = sqlite.clone();
+    let reg_c = registry.clone();
+    let routing_c = routing.clone();
+    let guard_c = guard_cfg.clone();
     let path_c = path.clone();
     let text_c = text.clone();
     tauri::async_runtime::spawn(async move {
@@ -870,11 +870,11 @@ pub async fn create_voice_note(
         language,
         title,
         id_slug,
-        &indexer,
-        &sqlite,
-        &registry,
-        &routing,
-        &guard_cfg,
+        indexer.inner(),
+        sqlite.inner(),
+        registry.inner(),
+        routing.inner(),
+        guard_cfg.inner(),
     )
     .await
 }
@@ -892,6 +892,27 @@ pub async fn describe_image(
     registry: State<'_, Arc<Registry>>,
     routing: State<'_, Arc<Routing>>,
     guard_cfg: State<'_, Arc<GuardConfig>>,
+) -> Result<String, String> {
+    describe_image_core(
+        &asset_rel,
+        indexer.inner(),
+        sqlite.inner(),
+        registry.inner(),
+        routing.inner(),
+        guard_cfg.inner(),
+    )
+    .await
+}
+
+/// describe_image 的核心（worker 复用；&Arc 参数，无 Tauri State）。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn describe_image_core(
+    asset_rel: &str,
+    indexer: &Arc<Indexer>,
+    sqlite: &Arc<SqliteIndex>,
+    registry: &Arc<Registry>,
+    routing: &Arc<Routing>,
+    guard_cfg: &Arc<GuardConfig>,
 ) -> Result<String, String> {
     use lmnotes_core::id::new_resource_id;
     use lmnotes_core::llm::provider::{ImageInput, DEFAULT_VISION_PROMPT};
@@ -911,9 +932,9 @@ pub async fn describe_image(
 
     // 2) 取 vision provider + 护栏
     let (vision, model) = registry
-        .vision_for(&routing, Task::Vision)
+        .vision_for(routing, Task::Vision)
         .map_err(|e| e.to_string())?;
-    match check(&guard_cfg, vision.kind(), "", false) {
+    match check(guard_cfg, vision.kind(), "", false) {
         GuardDecision::Allow => {}
         GuardDecision::Deny(reason) => return Err(reason),
     }
@@ -991,10 +1012,10 @@ pub async fn describe_image(
     if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
         eprintln!("image-desc index fail {path}: {e}");
     }
-    let sqlite_c = sqlite.inner().clone();
-    let reg_c = registry.inner().clone();
-    let routing_c = routing.inner().clone();
-    let guard_c = guard_cfg.inner().clone();
+    let sqlite_c = sqlite.clone();
+    let reg_c = registry.clone();
+    let routing_c = routing.clone();
+    let guard_c = guard_cfg.clone();
     let path_c = path.clone();
     let text_c = text.clone();
     tauri::async_runtime::spawn(async move {
@@ -1021,6 +1042,135 @@ fn mime_from_ext(ext: &str) -> String {
         _ => "application/octet-stream",
     }
     .to_string()
+}
+
+// ============ 媒体任务队列（FR-MEDIA-04，v0.5）============
+
+/// 媒体任务 DTO（前端任务中心行）。
+#[derive(serde::Serialize, Clone)]
+pub struct MediaTaskDto {
+    pub id: String,
+    pub kind: String,
+    pub asset_rel: String,
+    pub mime: String,
+    pub duration_ms: Option<i64>,
+    pub language: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    pub result_path: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl From<&lmnotes_core::index::schema::MediaTask> for MediaTaskDto {
+    fn from(t: &lmnotes_core::index::schema::MediaTask) -> Self {
+        Self {
+            id: t.id.clone(),
+            kind: t.kind.clone(),
+            asset_rel: t.asset_rel.clone(),
+            mime: t.mime.clone(),
+            duration_ms: t.duration_ms,
+            language: t.language.clone(),
+            status: t.status.clone(),
+            error: t.error.clone(),
+            result_path: t.result_path.clone(),
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+        }
+    }
+}
+
+/// 任务入队：媒体已归档（或先归档 bytes）→ pending → worker 处理。
+/// 接受两种调用：已归档（传 asset_rel）/ 未归档（传 data+ext+kind，先归档）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn enqueue_media_task(
+    kind: String, // transcribe | describe
+    asset_rel: Option<String>,
+    data: Option<Vec<u8>>,
+    ext: Option<String>,
+    mime: Option<String>,
+    duration_ms: Option<u64>,
+    language: Option<String>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<MediaTaskDto, String> {
+    if kind != "transcribe" && kind != "describe" {
+        return Err(format!("unknown task kind: {kind}"));
+    }
+    let asset_rel = match (asset_rel, data) {
+        (Some(r), _) => r,
+        (None, Some(bytes)) => {
+            let ext = ext.ok_or("missing ext")?;
+            let kind_dir = if !bytes.is_empty()
+                && mime.as_deref() == Some("video/mp4")
+                && kind == "transcribe"
+            {
+                // 由调用方指明音视频；此处按 mime 粗判
+                "audio"
+            } else if kind == "describe" {
+                "img"
+            } else {
+                "audio"
+            };
+            let (rel, _) = archive_binary(&bytes, &ext, kind_dir).await?;
+            rel
+        }
+        (None, None) => return Err("either asset_rel or data is required".into()),
+    };
+    let mime = mime.unwrap_or_else(|| "application/octet-stream".into());
+    let now = chrono::Utc::now().timestamp();
+    let t = lmnotes_core::index::schema::MediaTask {
+        id: format!(
+            "mt_{}_{}",
+            now,
+            lmnotes_core::id::new_resource_id("t")
+                .rsplit('_')
+                .next()
+                .unwrap_or("x")
+        ),
+        kind,
+        asset_rel,
+        mime,
+        duration_ms: duration_ms.map(|d| d as i64),
+        language,
+        status: "pending".into(),
+        error: None,
+        result_path: None,
+        created_at: now,
+        updated_at: now,
+    };
+    sqlite.insert_media_task(&t).map_err(|e| e.to_string())?;
+    Ok(MediaTaskDto::from(&t))
+}
+
+/// 列媒体任务（前端任务中心）。
+#[tauri::command]
+pub fn list_media_tasks(
+    status: Option<String>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<MediaTaskDto>, String> {
+    Ok(sqlite
+        .list_media_tasks(status.as_deref())
+        .map_err(|e| e.to_string())?
+        .iter()
+        .map(MediaTaskDto::from)
+        .collect())
+}
+
+/// 重试失败任务（failed → pending）。
+#[tauri::command]
+pub fn retry_media_task(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
+    sqlite
+        .update_media_task_status(&id, "pending", None, None)
+        .map_err(|e| e.to_string())
+}
+
+/// 取消任务（仅 pending；running 不强杀——worker 单并发很快轮到）。
+#[tauri::command]
+pub fn cancel_media_task(id: String, sqlite: State<'_, Arc<SqliteIndex>>) -> Result<(), String> {
+    sqlite
+        .update_media_task_status(&id, "cancelled", Some("cancelled by user"), None)
+        .map_err(|e| e.to_string())
 }
 
 /// 媒体文件转转录笔记（FR-CAP-04）：拖拽/粘贴的音频或视频文件。
@@ -1106,18 +1256,22 @@ pub async fn create_media_note(
         language,
         title,
         id_slug,
-        &indexer,
-        &sqlite,
-        &registry,
-        &routing,
-        &guard_cfg,
+        indexer.inner(),
+        sqlite.inner(),
+        registry.inner(),
+        routing.inner(),
+        guard_cfg.inner(),
     )
     .await
 }
 
 /// 构造 ffmpeg 抽音轨命令（纯函数便于单测参数拼装）。
 /// `ffmpeg -y -i <in> -vn -ar 16000 -ac 1 -c:a pcm_s16le <out>`
-fn build_extract_audio_cmd(ffmpeg: &Path, input: &Path, out: &Path) -> tokio::process::Command {
+pub(crate) fn build_extract_audio_cmd(
+    ffmpeg: &Path,
+    input: &Path,
+    out: &Path,
+) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(ffmpeg);
     cmd.arg("-y")
         .arg("-i")
@@ -1918,7 +2072,7 @@ pub fn whisper_binary_path() -> Option<PathBuf> {
     resolve_sidecar("whisper")
 }
 
-pub fn ffmpeg_binary_path() -> Option<PathBuf> {
+pub(crate) fn ffmpeg_binary_path() -> Option<PathBuf> {
     resolve_sidecar("ffmpeg")
 }
 

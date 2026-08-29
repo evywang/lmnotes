@@ -63,6 +63,24 @@ CREATE INDEX IF NOT EXISTS idx_sugg_concept ON suggestions(concept_id);
 CREATE INDEX IF NOT EXISTS idx_sugg_status ON suggestions(status);
 ";
 
+/// media_tasks 表：媒体处理后台任务（v0.5 FR-MEDIA-04，收编 FR-CAP-09）。
+pub const CREATE_MEDIA_TASKS: &str = "
+CREATE TABLE IF NOT EXISTS media_tasks (
+    id          TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL,
+    asset_rel   TEXT NOT NULL,
+    mime        TEXT NOT NULL,
+    duration_ms INTEGER,
+    language    TEXT,
+    status      TEXT NOT NULL,
+    error       TEXT,
+    result_path TEXT,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_media_tasks_status ON media_tasks(status);
+";
+
 /// chat_history 表：Chat with Vault 对话历史（M1c 增强）。
 pub const CREATE_CHAT_HISTORY: &str = "
 CREATE TABLE IF NOT EXISTS chat_history (
@@ -160,4 +178,24 @@ pub fn filter_titles(rows: &[ConceptRow], query: &str, limit: usize) -> Vec<Note
         });
     }
     out
+}
+
+/// 媒体后台任务（FR-MEDIA-04）。生命周期 pending → running → done/failed；
+/// cancelled 由用户从 pending 取消。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct MediaTask {
+    pub id: String,
+    /// transcribe | describe
+    pub kind: String,
+    /// 输入资产（/assets/{audio|video|img}/…）。
+    pub asset_rel: String,
+    pub mime: String,
+    pub duration_ms: Option<i64>,
+    pub language: Option<String>,
+    pub status: String,
+    pub error: Option<String>,
+    /// 产出笔记路径（transcripts/… 或 descriptions/…）。
+    pub result_path: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
