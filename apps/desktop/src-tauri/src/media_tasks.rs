@@ -119,7 +119,7 @@ async fn run_task(app: &tauri::AppHandle, deps: &WorkerDeps, task: &MediaTask) {
         Ok(Err(e)) => {
             let written = deps
                 .sqlite
-                .finish_running_media_task(&task.id, "failed", Some(&e), None)
+                .finish_running_media_task(&task.id, "failed", Some(&e.to_string()), None)
                 .unwrap_or(false);
             if written {
                 emit(app, task, "failed");
@@ -151,14 +151,20 @@ async fn run_task(app: &tauri::AppHandle, deps: &WorkerDeps, task: &MediaTask) {
     deps.cancels.unregister(&task.id);
 }
 
-async fn execute_with_retry(deps: &WorkerDeps, task: &MediaTask) -> Result<String, String> {
+async fn execute_with_retry(
+    deps: &WorkerDeps,
+    task: &MediaTask,
+) -> Result<String, lmnotes_core::CoreError> {
     match execute(deps, task).await {
         Ok(p) => Ok(p),
-        Err(e) if is_retryable(&e) => {
-            eprintln!(
-                "media task {} retryable failure ({e}), retrying once",
-                task.id
-            );
+        // v0.5.1 GAP-C 审计修复：类型化错误直接经 classify_transcribe_error 判定
+        //（不再对 Display 字符串猜测——reqwest 连接错误的 Display 不含 "connect"，
+        // 曾致断网首试失败不重试）
+        Err(e)
+            if lmnotes_core::llm::transcribe_fallback::classify_transcribe_error(&e)
+                == lmnotes_core::llm::transcribe_fallback::TranscribeErrorKind::Network =>
+        {
+            eprintln!("media task {} network failure ({e}), retrying once", task.id);
             tokio::time::sleep(Duration::from_secs(2)).await;
             execute(deps, task).await
         }
@@ -166,17 +172,10 @@ async fn execute_with_retry(deps: &WorkerDeps, task: &MediaTask) -> Result<Strin
     }
 }
 
-/// 网络类错误可重试（连接/超时/5xx）；配置/本地错误不重试。
-fn is_retryable(err: &str) -> bool {
-    let l = err.to_lowercase();
-    l.contains("timeout")
-        || l.contains("connect")
-        || l.contains("http 5")
-        || l.contains(" dns ")
-        || l.contains("timed out")
-}
-
-async fn execute(deps: &WorkerDeps, task: &MediaTask) -> Result<String, String> {
+async fn execute(
+    deps: &WorkerDeps,
+    task: &MediaTask,
+) -> Result<String, lmnotes_core::CoreError> {
     match task.kind.as_str() {
         "transcribe" => execute_transcribe(deps, task).await,
         "describe" => {
@@ -189,50 +188,62 @@ async fn execute(deps: &WorkerDeps, task: &MediaTask) -> Result<String, String> 
                 &deps.guard_cfg,
             )
             .await
+            .map_err(lmnotes_core::CoreError::Other)
         }
-        other => Err(format!("unknown task kind: {other}")),
+        other => Err(lmnotes_core::CoreError::Conformance(format!(
+            "unknown task kind: {other}"
+        ))),
     }
 }
 
 /// 转录任务：读归档媒体 →（视频抽音轨）→ 云优先/本地兜底转录 → transcript 笔记。
-/// 与同步命令同一编排（transcribe_with_fallback + build_and_write_transcript）。
-async fn execute_transcribe(deps: &WorkerDeps, task: &MediaTask) -> Result<String, String> {
+/// 与同步命令同一编排（try_transcribe_with_fallback + build_and_write_transcript）。
+/// 返回 typed CoreError——GAP-C 修复：重试判定需精确的 TranscribeErrorKind 分类。
+async fn execute_transcribe(
+    deps: &WorkerDeps,
+    task: &MediaTask,
+) -> Result<String, lmnotes_core::CoreError> {
     let rel = task.asset_rel.trim_start_matches('/');
     if !rel.starts_with("assets/") || rel.contains("..") {
-        return Err(format!("invalid asset path: {}", task.asset_rel));
+        return Err(lmnotes_core::CoreError::Conformance(format!(
+            "invalid asset path: {}",
+            task.asset_rel
+        )));
     }
     let full = vault_root().join(rel);
-    let data = tokio::fs::read(&full)
-        .await
-        .map_err(|e| format!("read asset failed: {e}"))?;
+    let data = tokio::fs::read(&full).await.map_err(lmnotes_core::CoreError::Io)?;
     let ext = rel.rsplit('.').next().unwrap_or("bin").to_string();
     let is_video = rel.starts_with("assets/video/");
 
-    // 视频：ffmpeg 抽音轨（队列任务的超时放宽——经 select 包一层总超时）
+    // 视频：ffmpeg 抽音轨（队列任务预算 15min）
     let audio_bytes: Vec<u8>;
     let audio_mime;
     let audio_ext;
     if is_video {
         let ffmpeg = ffmpeg_binary_path().ok_or_else(|| {
-            "video transcription requires the ffmpeg sidecar (not found)".to_string()
+            lmnotes_core::CoreError::Conformance(
+                "video transcription requires the ffmpeg sidecar (not found)".into(),
+            )
         })?;
-        let tmp = tempfile::tempdir().map_err(|e| e.to_string())?;
+        let tmp = tempfile::tempdir().map_err(lmnotes_core::CoreError::Io)?;
         let wav = tmp.path().join("audio.wav");
         let mut cmd = build_extract_audio_cmd(&ffmpeg, Path::new(&full), &wav);
         let out = tokio::time::timeout(QUEUED_SUBPROC_TIMEOUT, cmd.output())
             .await
-            .map_err(|_| "ffmpeg audio extraction timed out (15min)".to_string())?
-            .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
+            .map_err(|_| {
+                lmnotes_core::CoreError::Conformance(
+                    "ffmpeg audio extraction timed out (15min)".into(),
+                )
+            })?
+            .map_err(lmnotes_core::CoreError::Io)?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
-            return Err(format!(
+            return Err(lmnotes_core::CoreError::Conformance(format!(
                 "ffmpeg failed: {}",
                 stderr.chars().take(300).collect::<String>()
-            ));
+            )));
         }
-        audio_bytes = tokio::fs::read(&wav)
-            .await
-            .map_err(|e| format!("read extracted audio failed: {e}"))?;
+        audio_bytes = tokio::fs::read(&wav).await.map_err(lmnotes_core::CoreError::Io)?;
         audio_mime = "audio/wav".into();
         audio_ext = "wav".into();
     } else {
@@ -241,27 +252,37 @@ async fn execute_transcribe(deps: &WorkerDeps, task: &MediaTask) -> Result<Strin
         audio_ext = ext;
     }
     if audio_bytes.is_empty() {
-        return Err("no audio track found in media file".into());
+        return Err(lmnotes_core::CoreError::Conformance(
+            "no audio track found in media file".into(),
+        ));
     }
 
-    let (tr, provider_id) = transcribe_with_fallback(
-        &deps.registry,
-        &deps.routing,
-        &deps.guard_cfg,
-        AudioInput {
-            bytes: audio_bytes,
-            mime: audio_mime,
-            filename: format!(
-                "{hash}.{audio_ext}",
-                hash = hash_of(rel),
-                audio_ext = audio_ext
-            ),
-        },
-        task.language.as_deref(),
-        // 队列预算：15min（v0.5.1 兑现设计承诺；长视频抽音轨同预算见 execute_transcribe）
-        std::time::Duration::from_secs(15 * 60),
+    // 队列预算 15min（v0.5.1）；typed CoreError 供 GAP-C 精确重试分类
+    let outcome = tokio::time::timeout(
+        QUEUED_SUBPROC_TIMEOUT,
+        lmnotes_core::llm::transcribe_fallback::try_transcribe_with_fallback(
+            &deps.registry,
+            &deps.routing,
+            &deps.guard_cfg,
+            AudioInput {
+                bytes: audio_bytes,
+                mime: audio_mime,
+                filename: format!(
+                    "{hash}.{audio_ext}",
+                    hash = hash_of(rel),
+                    audio_ext = audio_ext
+                ),
+            },
+            task.language.as_deref(),
+        ),
     )
-    .await?;
+    .await
+    .map_err(|_| {
+        lmnotes_core::CoreError::Conformance(
+            "transcription timed out (900s, queued budget)".into(),
+        )
+    })?;
+    let (tr, provider_id) = outcome?;
 
     build_and_write_transcript(
         task.asset_rel.clone(),

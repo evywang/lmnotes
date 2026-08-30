@@ -739,7 +739,7 @@ pub(crate) async fn build_and_write_transcript(
     registry: &Arc<Registry>,
     routing: &Arc<Routing>,
     guard_cfg: &Arc<GuardConfig>,
-) -> Result<String, String> {
+) -> Result<String, lmnotes_core::CoreError> {
     use chrono::Utc;
     use lmnotes_core::id::new_resource_id;
     use lmnotes_core::okf::concept::Concept;
@@ -802,11 +802,11 @@ pub(crate) async fn build_and_write_transcript(
     if let Some(p) = full.parent() {
         tokio::fs::create_dir_all(p)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(lmnotes_core::CoreError::Io)?;
     }
     tokio::fs::write(&full, &text)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(lmnotes_core::CoreError::Io)?;
 
     if let Err(e) = indexer.index_concept(&path, &text, &concept).await {
         eprintln!("transcript note index fail {path}: {e}");
@@ -893,6 +893,8 @@ pub async fn create_voice_note(
         guard_cfg.inner(),
     )
     .await
+
+    .map_err(|e| e.to_string())
 }
 
 /// 图片描述（FR-MEDIA-02）：已归档图片 → 视觉 LLM 描述/OCR → image-desc concept。
@@ -1579,6 +1581,8 @@ pub async fn create_media_note(
         guard_cfg.inner(),
     )
     .await
+
+    .map_err(|e| e.to_string())
 }
 
 /// 构造 ffmpeg 抽音轨命令（纯函数便于单测参数拼装）。
