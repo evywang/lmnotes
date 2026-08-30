@@ -21,6 +21,7 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
   const [preview, setPreview] = createSignal(false);
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [mediaBusy, setMediaBusy] = createSignal(false); // 音视频转录中（FR-CAP-04）
+  const [queuedHint, setQueuedHint] = createSignal(false); // 已入队提示（v0.5 分流）
   const [extracting, setExtracting] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let viewGetter = () => undefined as EditorView | undefined;
@@ -87,6 +88,36 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
     return marked.parse(body, { async: false }) as string;
   });
 
+  // v0.5 分流阈值（config.media.background_threshold_ms，懒加载一次）
+  let thresholdMs: number | null = null;
+  const backgroundThreshold = async (): Promise<number> => {
+    if (thresholdMs === null) {
+      try {
+        const cfg = await invoke<{ media: { background_threshold_ms: number } }>("get_config");
+        thresholdMs = cfg.media?.background_threshold_ms ?? 60_000;
+      } catch {
+        thresholdMs = 60_000;
+      }
+    }
+    return thresholdMs;
+  };
+
+  // 探测本地文件的媒体时长（Blob URL + 元数据）。探测失败返回 null → 走队列（安全默认）。
+  const probeDurationMs = (f: File): Promise<number | null> =>
+    new Promise((resolve) => {
+      const el = document.createElement("video");
+      el.preload = "metadata";
+      el.onloadedmetadata = () => {
+        URL.revokeObjectURL(el.src);
+        resolve(Number.isFinite(el.duration) ? el.duration * 1000 : null);
+      };
+      el.onerror = () => {
+        URL.revokeObjectURL(el.src);
+        resolve(null);
+      };
+      el.src = URL.createObjectURL(f);
+    });
+
   const handleFiles = async (files: FileList) => {
     for (const f of Array.from(files)) {
       const buf = new Uint8Array(await f.arrayBuffer());
@@ -97,18 +128,35 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
         const kind = f.type.startsWith("video/") ? "video" : "audio";
         setMediaBusy(true);
         try {
-          const path = await invoke<string>("create_media_note", {
-            data: Array.from(buf),
-            ext,
-            mime: f.type,
-            kind,
-            durationMs: null,
-            language: null,
-            title: null,
-          });
-          props.onNavigate?.(path);
+          // v0.5 分流（FR-MEDIA-04）：时长超阈值（或探测失败）→ 后台队列；
+          // 短媒体走同步（即时反馈）。
+          const durationMs = await probeDurationMs(f);
+          const threshold = await backgroundThreshold();
+          const toBackground = durationMs === null || durationMs > threshold;
+          if (toBackground) {
+            await invoke("enqueue_media_task", {
+              kind,
+              data: Array.from(buf),
+              ext,
+              mime: f.type,
+              durationMs: durationMs === null ? null : Math.round(durationMs),
+              language: null,
+            });
+            setQueuedHint(true);
+          } else {
+            const path = await invoke<string>("create_media_note", {
+              data: Array.from(buf),
+              ext,
+              mime: f.type,
+              kind,
+              durationMs: durationMs === null ? null : Math.round(durationMs),
+              language: null,
+              title: null,
+            });
+            props.onNavigate?.(path);
+          }
         } catch (e) {
-          console.error("create_media_note failed", e);
+          console.error("media transcription failed", e);
           void message(`${t("editor.mediaFailed")}${e}`, {
             title: APP_NAME,
             kind: "error",
@@ -164,6 +212,9 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
         </Show>
         <Show when={mediaBusy()}>
           <span class="muted small">🎙 {t("editor.mediaTranscribing")}</span>
+        </Show>
+        <Show when={queuedHint()}>
+          <span class="muted small">⏳ {t("editor.mediaQueued")}</span>
         </Show>
         <Show when={canExtractActions()}>
           <button

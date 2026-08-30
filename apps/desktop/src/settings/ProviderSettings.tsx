@@ -33,6 +33,7 @@ interface Config {
     rewrite?: ProviderRefSer;
   };
   guard: { cloud_allowed: boolean; sensitive_patterns: string[] };
+  media: { background_threshold_ms: number };
 }
 
 interface ProviderHealth {
@@ -237,6 +238,25 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   />
                   {t("settings.cloudAllowed")}
                 </label>
+              </div>
+
+              <div class="guard-section">
+                <label class="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={cfg().media.background_threshold_ms === 0}
+                    onChange={(e) =>
+                      setConfig({
+                        ...cfg(),
+                        media: {
+                          background_threshold_ms: e.currentTarget.checked ? 0 : 60_000,
+                        },
+                      })
+                    }
+                  />
+                  {t("settings.backgroundMedia")}
+                </label>
+                <p class="muted small">{t("settings.backgroundMediaHint")}</p>
               </div>
 
               <LocalSttSetup />

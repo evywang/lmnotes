@@ -51,6 +51,8 @@ export const en = {
   "voice.processing": "Transcribing…",
   "voice.permissionDenied": "Microphone permission denied.",
   "voice.errorTranscribe": "Transcription failed: {msg}",
+  "voice.queuedHint": "Recording is longer than the threshold — queued for background transcription. Check ⏳ Tasks.",
+  "editor.mediaQueued": "Queued for background transcription (⏳ Tasks).",
   "voice.cloudDownNoLocal": "Cloud transcribe unavailable and no local STT ready. You can download a local model to enable offline fallback.",
   "voice.openSettings": "Open settings to download a model",
 
@@ -140,6 +142,8 @@ export const en = {
   "settings.transcribeModelPlaceholder": "e.g. whisper-1 (enables voice input)",
   "settings.visionModel": "Vision Model (optional)",
   "settings.visionModelPlaceholder": "e.g. gpt-4o-mini / llava (describes pasted images)",
+  "settings.backgroundMedia": "Transcribe all media in the background",
+  "settings.backgroundMediaHint": "Off (default): recordings under 60s transcribe inline for instant feedback; longer media is queued. On: everything is queued (check ⏳ Tasks for progress).",
 
   // ── Data export (FR-STORE-05) ─────────────────────────────────────────
   "data.title": "Data",

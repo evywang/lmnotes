@@ -18,6 +18,9 @@ pub struct Config {
     /// MCP server 配置（暴露笔记给 AI agent）。向后兼容：旧 config.json 无此段时取默认。
     #[serde(default)]
     pub mcp: McpConfig,
+    /// 媒体处理策略（v0.5 分流：短同步 / 长入队）。旧 config 无此段取默认。
+    #[serde(default)]
+    pub media: MediaConfig,
     /// 已登记的 vault 目录（绝对路径）。v0.4 多库（FR-STORE-01）；旧 config 无此段取默认单库。
     #[serde(default = "default_vaults")]
     pub vaults: Vec<String>,
@@ -56,6 +59,26 @@ pub fn current_vault() -> std::path::PathBuf {
             resolve_vault(cfg.last_vault.as_deref(), &default_vault_path())
         })
         .clone()
+}
+
+/// 媒体处理策略（v0.5 设计 T4：短同步 / 长入队分流）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaConfig {
+    /// 超过该时长(ms)的音视频转录入队后台处理；以内同步执行。默认 60_000。
+    #[serde(default = "default_background_threshold")]
+    pub background_threshold_ms: u64,
+}
+
+fn default_background_threshold() -> u64 {
+    60_000
+}
+
+impl Default for MediaConfig {
+    fn default() -> Self {
+        Self {
+            background_threshold_ms: default_background_threshold(),
+        }
+    }
 }
 
 /// MCP server（暴露 vault 给 AI agent）的配置。
@@ -229,6 +252,7 @@ impl Default for Config {
             },
             guard: GuardConfigSer::default(),
             mcp: McpConfig::default(),
+            media: MediaConfig::default(),
             vaults: default_vaults(),
             last_vault: None,
         }

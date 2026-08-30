@@ -30,6 +30,7 @@ export function VoiceCapture(props: {
   const [processing, setProcessing] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
   const [needsLocalSetup, setNeedsLocalSetup] = createSignal(false);
+  const [queued, setQueued] = createSignal(false); // 长录音已入队（任务中心可查，v0.5 分流）
 
   let recorder: MediaRecorder | null = null;
   let chunks: BlobPart[] = [];
@@ -118,11 +119,34 @@ export function VoiceCapture(props: {
       const buf = new Uint8Array(await blob.arrayBuffer());
       // Tauri IPC 期望普通数组（序列化为 JSON）；ext 按 mime 推断
       const ext = (recorder?.mimeType || "audio/webm").includes("mp4") ? "mp4" : "webm";
+      // v0.5 分流：长录音（超阈值）入队后台处理，速记保持同步（即时反馈）
+      let threshold = 60_000;
+      try {
+        const cfg = await invoke<{ media: { background_threshold_ms: number } }>("get_config");
+        threshold = cfg.media?.background_threshold_ms ?? 60_000;
+      } catch {
+        /* 读不到配置用默认 60s */
+      }
+      const durationMs = seconds() * 1000;
+      if (durationMs > threshold) {
+        await invoke("enqueue_media_task", {
+          kind: "transcribe",
+          assetRel: null,
+          data: Array.from(buf),
+          ext,
+          mime: blob.type,
+          durationMs,
+          language: null,
+        });
+        setQueued(true);
+        props.onClose();
+        return;
+      }
       const path = await invoke<string>("create_voice_note", {
         audio: Array.from(buf),
         ext,
         mime: blob.type,
-        durationMs: seconds() * 1000,
+        durationMs,
         language: null,
         title: null,
       });
@@ -165,6 +189,10 @@ export function VoiceCapture(props: {
               {t("voice.openSettings")}
             </button>
           </Show>
+        </Show>
+
+        <Show when={queued()}>
+          <p class="muted small">{t("voice.queuedHint")}</p>
         </Show>
 
         <Show

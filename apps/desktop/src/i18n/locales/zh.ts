@@ -52,6 +52,8 @@ export const zh: Record<MessageKey, string> = {
   "voice.processing": "转录中…",
   "voice.permissionDenied": "已拒绝麦克风权限。",
   "voice.errorTranscribe": "转录失败：{msg}",
+  "voice.queuedHint": "录音超过阈值——已加入后台队列转录。请在「⏳ 任务」查看进度。",
+  "editor.mediaQueued": "已加入后台队列转录（⏳ 任务可查）。",
   "voice.cloudDownNoLocal": "云端转录不可用且本地未就绪。可下载一个本地模型，启用离线降级。",
   "voice.openSettings": "打开设置下载模型",
 
@@ -141,6 +143,8 @@ export const zh: Record<MessageKey, string> = {
   "settings.transcribeModelPlaceholder": "如 whisper-1（填后启用语音输入）",
   "settings.visionModel": "视觉模型（可选）",
   "settings.visionModelPlaceholder": "如 gpt-4o-mini / llava（粘贴图片自动生成描述）",
+  "settings.backgroundMedia": "所有媒体转录入队后台处理",
+  "settings.backgroundMediaHint": "关（默认）：60s 内的录音同步转录、即时反馈，更长媒体自动入队；开：全部入队（⏳ 任务可查进度）。",
 
   // ── 数据导出 (FR-STORE-05) ────────────────────────────────────────────
   "data.title": "数据",
