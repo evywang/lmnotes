@@ -893,7 +893,6 @@ pub async fn create_voice_note(
         guard_cfg.inner(),
     )
     .await
-
     .map_err(|e| e.to_string())
 }
 
@@ -1581,7 +1580,6 @@ pub async fn create_media_note(
         guard_cfg.inner(),
     )
     .await
-
     .map_err(|e| e.to_string())
 }
 
@@ -2605,11 +2603,26 @@ mod tests {
     #[test]
     fn media_kind_dir_buckets_by_mime() {
         // GAP-B 回归：video mime 必须落 video 桶（旧实现归 audio → 队列视频任务必败）
-        assert!(matches!(media_kind_dir(Some("video/mp4"), "transcribe"), Ok("video")));
-        assert!(matches!(media_kind_dir(Some("video/webm"), "transcribe"), Ok("video")));
-        assert!(matches!(media_kind_dir(Some("audio/webm"), "transcribe"), Ok("audio")));
-        assert!(matches!(media_kind_dir(Some("audio/mpeg"), "transcribe"), Ok("audio")));
-        assert!(matches!(media_kind_dir(Some("image/png"), "describe"), Ok("img")));
+        assert!(matches!(
+            media_kind_dir(Some("video/mp4"), "transcribe"),
+            Ok("video")
+        ));
+        assert!(matches!(
+            media_kind_dir(Some("video/webm"), "transcribe"),
+            Ok("video")
+        ));
+        assert!(matches!(
+            media_kind_dir(Some("audio/webm"), "transcribe"),
+            Ok("audio")
+        ));
+        assert!(matches!(
+            media_kind_dir(Some("audio/mpeg"), "transcribe"),
+            Ok("audio")
+        ));
+        assert!(matches!(
+            media_kind_dir(Some("image/png"), "describe"),
+            Ok("img")
+        ));
         // 不匹配的 mime 拒绝（防止静默归错桶）
         assert!(media_kind_dir(Some("video/mp4"), "describe").is_err());
         assert!(media_kind_dir(Some("image/png"), "transcribe").is_err());

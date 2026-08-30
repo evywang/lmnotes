@@ -638,6 +638,7 @@ mod tests {
                 ..Default::default()
             },
             mcp: McpConfig::default(),
+            media: MediaConfig::default(),
             vaults: default_vaults(),
             last_vault: None,
         }

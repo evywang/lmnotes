@@ -11,7 +11,7 @@
 
 use crate::commands::{
     build_and_write_transcript, build_extract_audio_cmd, describe_image_core, ffmpeg_binary_path,
-    transcribe_with_fallback, vault_root,
+    vault_root,
 };
 use lmnotes_core::index::schema::MediaTask;
 use lmnotes_core::index::SqliteIndex;
@@ -164,7 +164,10 @@ async fn execute_with_retry(
             if lmnotes_core::llm::transcribe_fallback::classify_transcribe_error(&e)
                 == lmnotes_core::llm::transcribe_fallback::TranscribeErrorKind::Network =>
         {
-            eprintln!("media task {} network failure ({e}), retrying once", task.id);
+            eprintln!(
+                "media task {} network failure ({e}), retrying once",
+                task.id
+            );
             tokio::time::sleep(Duration::from_secs(2)).await;
             execute(deps, task).await
         }
@@ -172,24 +175,19 @@ async fn execute_with_retry(
     }
 }
 
-async fn execute(
-    deps: &WorkerDeps,
-    task: &MediaTask,
-) -> Result<String, lmnotes_core::CoreError> {
+async fn execute(deps: &WorkerDeps, task: &MediaTask) -> Result<String, lmnotes_core::CoreError> {
     match task.kind.as_str() {
         "transcribe" => execute_transcribe(deps, task).await,
-        "describe" => {
-            describe_image_core(
-                &task.asset_rel,
-                &deps.indexer,
-                &deps.sqlite,
-                &deps.registry,
-                &deps.routing,
-                &deps.guard_cfg,
-            )
-            .await
-            .map_err(lmnotes_core::CoreError::Other)
-        }
+        "describe" => describe_image_core(
+            &task.asset_rel,
+            &deps.indexer,
+            &deps.sqlite,
+            &deps.registry,
+            &deps.routing,
+            &deps.guard_cfg,
+        )
+        .await
+        .map_err(lmnotes_core::CoreError::Other),
         other => Err(lmnotes_core::CoreError::Conformance(format!(
             "unknown task kind: {other}"
         ))),
@@ -211,7 +209,9 @@ async fn execute_transcribe(
         )));
     }
     let full = vault_root().join(rel);
-    let data = tokio::fs::read(&full).await.map_err(lmnotes_core::CoreError::Io)?;
+    let data = tokio::fs::read(&full)
+        .await
+        .map_err(lmnotes_core::CoreError::Io)?;
     let ext = rel.rsplit('.').next().unwrap_or("bin").to_string();
     let is_video = rel.starts_with("assets/video/");
 
@@ -243,7 +243,9 @@ async fn execute_transcribe(
                 stderr.chars().take(300).collect::<String>()
             )));
         }
-        audio_bytes = tokio::fs::read(&wav).await.map_err(lmnotes_core::CoreError::Io)?;
+        audio_bytes = tokio::fs::read(&wav)
+            .await
+            .map_err(lmnotes_core::CoreError::Io)?;
         audio_mime = "audio/wav".into();
         audio_ext = "wav".into();
     } else {
@@ -278,9 +280,7 @@ async fn execute_transcribe(
     )
     .await
     .map_err(|_| {
-        lmnotes_core::CoreError::Conformance(
-            "transcription timed out (900s, queued budget)".into(),
-        )
+        lmnotes_core::CoreError::Conformance("transcription timed out (900s, queued budget)".into())
     })?;
     let (tr, provider_id) = outcome?;
 
