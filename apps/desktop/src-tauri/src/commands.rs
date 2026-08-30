@@ -1367,6 +1367,29 @@ impl From<&lmnotes_core::index::schema::MediaTask> for MediaTaskDto {
     }
 }
 
+/// 由 mime + 任务 kind 决定归档桶（纯函数，便于单测）。
+/// video/* → video；audio/* → audio；describe 任务（图片）→ img。
+/// worker 以 `assets/video/` 前缀判定需抽音轨——分桶错误会让队列视频任务必败。
+fn media_kind_dir(mime: Option<&str>, kind: &str) -> Result<&'static str, String> {
+    let mime = mime.unwrap_or("");
+    if kind == "describe" {
+        return if mime.starts_with("image/") {
+            Ok("img")
+        } else {
+            Err(format!("describe tasks require image/*, got {mime:?}"))
+        };
+    }
+    if mime.starts_with("video/") {
+        Ok("video")
+    } else if mime.starts_with("audio/") {
+        Ok("audio")
+    } else {
+        Err(format!(
+            "transcribe tasks require audio/* or video/*, got {mime:?}"
+        ))
+    }
+}
+
 /// 任务入队：媒体已归档（或先归档 bytes）→ pending → worker 处理。
 /// 接受两种调用：已归档（传 asset_rel）/ 未归档（传 data+ext+kind，先归档）。
 #[tauri::command]
@@ -1388,17 +1411,9 @@ pub async fn enqueue_media_task(
         (Some(r), _) => r,
         (None, Some(bytes)) => {
             let ext = ext.ok_or("missing ext")?;
-            let kind_dir = if !bytes.is_empty()
-                && mime.as_deref() == Some("video/mp4")
-                && kind == "transcribe"
-            {
-                // 由调用方指明音视频；此处按 mime 粗判
-                "audio"
-            } else if kind == "describe" {
-                "img"
-            } else {
-                "audio"
-            };
+            // 按 mime 前缀分桶（GAP-B 修复：video 必须落 assets/video/——
+            // worker 靠该前缀决定是否抽音轨，归错桶会导致队列视频任务必败）
+            let kind_dir = media_kind_dir(mime.as_deref(), &kind)?;
             let (rel, _) = archive_binary(&bytes, &ext, kind_dir).await?;
             rel
         }
@@ -2578,10 +2593,24 @@ async fn download_attempt(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_extract_audio_cmd, parse_snapshot_ts, pick_preferred_model,
+        build_extract_audio_cmd, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
         render_template_placeholders,
     };
     use chrono::TimeZone;
+
+    #[test]
+    fn media_kind_dir_buckets_by_mime() {
+        // GAP-B 回归：video mime 必须落 video 桶（旧实现归 audio → 队列视频任务必败）
+        assert!(matches!(media_kind_dir(Some("video/mp4"), "transcribe"), Ok("video")));
+        assert!(matches!(media_kind_dir(Some("video/webm"), "transcribe"), Ok("video")));
+        assert!(matches!(media_kind_dir(Some("audio/webm"), "transcribe"), Ok("audio")));
+        assert!(matches!(media_kind_dir(Some("audio/mpeg"), "transcribe"), Ok("audio")));
+        assert!(matches!(media_kind_dir(Some("image/png"), "describe"), Ok("img")));
+        // 不匹配的 mime 拒绝（防止静默归错桶）
+        assert!(media_kind_dir(Some("video/mp4"), "describe").is_err());
+        assert!(media_kind_dir(Some("image/png"), "transcribe").is_err());
+        assert!(media_kind_dir(None, "transcribe").is_err());
+    }
 
     #[test]
     fn template_placeholders_replace_all() {
