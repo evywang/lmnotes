@@ -82,11 +82,13 @@ fn decode_f32_blob(blob: &[u8]) -> crate::Result<Vec<f32>> {
             blob.len()
         )));
     }
-    blob.chunks_exact(4)
-        .map(|chunk| {
-            let bytes: [u8; 4] = chunk.try_into().expect("chunks_exact(4) yields 4 bytes");
-            Ok(f32::from_le_bytes(bytes))
-        })
+    // as_chunks（Rust 1.88+）：常量分块由类型保证，替代 chunks_exact(4)+try_into
+    //（CI clippy 1.98 的 chunks_exact_to_as_chunks lint 要求）。
+    // 上方已校验 len 是 4 的倍数，rest 恒为空。
+    let (chunks, _rest) = blob.as_chunks::<4>();
+    chunks
+        .iter()
+        .map(|chunk| Ok(f32::from_le_bytes(*chunk)))
         .collect()
 }
 
