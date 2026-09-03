@@ -52,8 +52,12 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cmake
 
+      # gh（fetch-sidecars.sh 内部用）在 Actions 里必须显式传 token，
+      # 否则 `gh release view/download` 以 exit 4 失败（Windows 实测）。
       - name: Fetch/build whisper.cpp + ffmpeg sidecar binaries (ADR-0007)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [[ "${{ matrix.target }}" == *darwin* ]]; then
             .github/scripts/build-sidecars-macos.sh ${{ matrix.target }}
@@ -61,21 +65,9 @@ jobs:
             .github/scripts/fetch-sidecars.sh ${{ matrix.target }}
           fi
 
-      # 运行时注入 externalBin（dev 不需要，避免本地构建报缺二进制）。
-      # 经 tauri build --config <文件> 传入——实测 TAURI_CONFIG 环境变量在
-      # npm run tauri:build 链路上不生效（安装包内无 sidecar），--config 可靠。
-      # resources：whisper 伴生动态库（Win: whisper.dll/ggml*.dll；Linux: lib*.so*）
-      # 平铺到资源目录根（Windows NSIS 下 = 主程序/sidecar 同目录，DLL 搜索才能命中；
-      # map+glob 语义 = 只保留文件名）。glob 无匹配会报错，故按 OS 分文件。
-      - name: Select sidecar bundle config (per-OS)
-        shell: bash
-        run: |
-          case "${{ matrix.target }}" in
-            *windows*) f=sidecar-win.json ;;
-            *darwin*)  f=sidecar-macos.json ;;
-            *)         f=sidecar-linux.json ;;
-          esac
-          echo "TAURI_ARGS=--config ${{ github.workspace }}/apps/desktop/src-tauri/$f" >> "$GITHUB_ENV"
+      # externalBin 与 resources 已由 tauri.{windows,linux,macos}.conf.json 声明，
+      # Tauri 2 按当前平台自动加载（b0878c9 起）——无需再经 --config 注入；
+      # 旧的 sidecar-*.json 选择步骤引用的文件已随该提交改名删除。
 
       # 可选签名/公证（ADR-0007/设计）：无 Apple Secrets 时跳过（产物为未签名 dmg）。
       - name: Codesign & notarize (optional)
@@ -97,9 +89,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: apps/desktop
-          args: ${{ env.TAURI_ARGS }}
           tagName: ${{ github.ref_name }}
           releaseName: "LMNotes ${{ github.ref_name }}"
-          releaseBody: "LMNotes v0.5 — background media tasks, note templates, vault export, macOS builds (unsigned dmg). See release notes."
+          releaseBody: "LMNotes v0.6 — cancellable media tasks with timeout budgets, voice fixes (Windows sidecar bundling, in-app model download, multi-provider cloud STT). See release notes."
           releaseDraft: true
           prerelease: false

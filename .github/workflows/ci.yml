@@ -22,6 +22,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev build-essential curl wget file libxdo-dev libssl-dev pkg-config
+      # tauri.*.conf.json（b0878c9 起被 Tauri 2 自动加载）声明了 externalBin 与
+      # resources glob，tauri-build 在编译期校验其存在。CI 不下载真实 sidecar
+      # （约百 MB，仅 release 需要），用空占位文件满足存在性检查——本地已验证
+      # `cargo check -p lmnotes-desktop` 可通过（clippy/test 不 spawn sidecar）。
+      - name: Sidecar placeholders (tauri-build externalBin/resources check)
+        shell: bash
+        run: |
+          cd apps/desktop/src-tauri && mkdir -p binaries && cd binaries
+          TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          EXE=""; LIB="placeholder.dylib"
+          case "$TRIPLE" in
+            *windows*) EXE=".exe"; LIB="placeholder.dll" ;;
+            *linux*)   LIB="placeholder.so" ;;
+          esac
+          printf '' > "whisper-$TRIPLE$EXE"
+          printf '' > "ffmpeg-$TRIPLE$EXE"
+          printf 'CI placeholder satisfying bundle.resources glob' > "$LIB"
       - name: fmt
         run: cargo fmt --all -- --check
       - name: clippy (ADR-0002 std::fs constraint enforced via clippy.toml)
@@ -48,5 +65,13 @@ jobs:
         run: cd apps/desktop && npx tsc --noEmit
       - name: Frontend build
         run: cd apps/desktop && npm run build
+      - name: Sidecar placeholders (tauri-build externalBin/resources check)
+        shell: bash
+        run: |
+          cd apps/desktop/src-tauri && mkdir -p binaries && cd binaries
+          TRIPLE="$(rustc -vV | sed -n 's/^host: //p')"
+          printf '' > "whisper-$TRIPLE"
+          printf '' > "ffmpeg-$TRIPLE"
+          printf 'CI placeholder satisfying bundle.resources glob' > "placeholder.so"
       - name: Tauri crate check
         run: cargo check -p lmnotes-desktop
