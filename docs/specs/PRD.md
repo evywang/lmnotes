@@ -267,7 +267,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-CAP-02 | 所见即所写 Markdown 编辑器（CommonMark + GFM：表格/任务列表/脚注/数学） | MVP |
 | FR-CAP-03 | 实时双向链接补全：键入 `[](` 时按 title/alias/id 补全为目标 concept 的 OKF 路径链接（✅ v0.3.0 已实现：`[` 触发，title/alias/路径补全） | MVP |
 | FR-CAP-04 | 拖拽 / 粘贴 / 选择文件 添加图片、音频、视频；自动落 `assets/` 并生成对应描述 concept（§3.5）（✅ v0.4.0：图片描述 + 音视频自动转录） | MVP |
-| FR-CAP-05 | 语音输入：按住说话 / 流式转录，可选用本地 Whisper 或云端（✅ MVP 已实现点按录音+云端 Whisper 批量转录，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)；push-to-talk/流式/本地引擎留 P1） | MVP |
+| FR-CAP-05 | 语音输入：按住说话 / 流式转录，可选用本地 Whisper 或云端（✅ MVP 已实现点按录音+云端 Whisper 批量转录，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)；push-to-talk ✅ v0.4.0、本地引擎 ✅ [ADR-0007](../adr/ADR-0007-local-stt-fallback.md)、多 Provider 云端 STT ✅ v0.6.0；流式留后续） | MVP |
 | FR-CAP-06 | 移动端"速记"入口（下拉通知/小组件/Share Sheet 接收外部分享） | P1 |
 | FR-CAP-07 | 块级拖拽、折叠、列表大纲模式 | P1 |
 | FR-CAP-08 | 模板系统（每日笔记模板、会议模板等，支持 frontmatter 占位符）（✅ v0.5.0 已实现） | P1 |
@@ -279,7 +279,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-MEDIA-01 | 音频自动转录（Whisper 兼容引擎），转录稿写入 `type: transcript` 的描述 concept（§3.5）（✅ MVP 已实现，见 [ADR-0006](../adr/ADR-0006-voice-transcription.md)） | MVP |
 | FR-MEDIA-02 | 图片 OCR + 视觉描述（多模态 LLM 或专用模型）（✅ v0.4.0 已实现：VisionCap + image-desc concept） | P1 |
 | FR-MEDIA-03 | 视频抽关键帧 + 转录音轨；关键帧索引化 | P2 |
-| FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑（✅ v0.5.0 已实现：media_tasks 表 + 后台 worker + 任务中心） | MVP |
+| FR-MEDIA-04 | 媒体处理任务队列，可暂停/重试，失败不阻塞编辑（✅ v0.5.0 已实现：media_tasks 表 + 后台 worker + 任务中心；v0.6.0 收口：running 可取消、超时预算队列 15min/内联 60s、长媒体自动后台分流） | MVP |
 | FR-MEDIA-05 | 处理引擎可插拔（本地 whisper.cpp / 云端 API）（✅ 已实现：云端 Whisper + 本地 whisper.cpp sidecar，运行时自动降级，见 [ADR-0007](../adr/ADR-0007-local-stt-fallback.md)） | P1 |
 
 ### 5.4 LLM 智能（域：LLM）—— 核心差异化

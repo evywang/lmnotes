@@ -202,18 +202,18 @@ LMNotes 主窗口采用三栏布局：
 **前置配置（云端，可选）**：
 
 1. 打开 **设置**（`Ctrl+,` 或点 ⚙）。
-2. 在某个 **OpenAI 兼容** provider 下填写 **Transcribe Model**（如 `whisper-1`；Groq 可填 `whisper-large-v3`）。
+2. 在某个 **OpenAI 兼容** provider 下填写 **Transcribe Model**（如 `whisper-1`；Groq 可填 `whisper-large-v3`）。若现有 provider 都不提供转录端点（如智谱 GLM 无 `/audio/transcriptions`），点 **「+ 添加 OpenAI 兼容 Provider」** 专供在线 STT（如硅基流动 `https://api.siliconflow.cn/v1`，模型填 `FunAudioLLM/SenseVoiceSmall`）。该字段仅对 OpenAI 兼容 provider 显示（Ollama 不做云端转录）。
 3. 勾选 **允许云端 Provider（默认关闭，本地优先）**。
-4. 保存后**重启应用**生效。
+4. 保存后**重启应用**生效。转录路由**自动派生**到第一个填了 Transcribe Model 的 provider，无需手动配置。
 
 > 不配云端也能用：本地 whisper.cpp 开箱即作为兜底（仅需下载模型）。配了云端则云端优先、本地兜底。
 
 **下载本地模型（首次离线用）**：
 
-1. 打开 **设置** → 滚到「🎙️ 本地 STT（离线降级）」小节。
-2. 显示 whisper.cpp / ffmpeg 引擎状态（随安装包就绪）。
-3. 选模型点下载：**Base**（~140MB，英文尚可/中文一般，首试推荐）/ **Small**（~466MB，中英平衡，日常推荐）/ **Medium**（~1.5GB，中文好但慢）。
-4. 下载到 `~/.lmnotes/models/ggml-<name>.bin`，进度条可见。
+- **弹窗内直接下载（v0.6）**：打开语音弹窗即自动探测本地就绪状态；引擎在而无模型 → 弹窗内嵌下载面板，下载完成自动收起，**无需重启应用**（whisper.cpp 转录时动态解析模型路径）。
+- 也可从 **设置** → 「🎙️ 本地 STT（离线降级）」小节下载（显示 whisper.cpp / ffmpeg 引擎状态，随安装包就绪）。
+- 选模型点下载：**Base**（~140MB，英文尚可/中文一般，首试推荐）/ **Small**（~466MB，中英平衡，日常推荐）/ **Medium**（~1.5GB，中文好但慢）。
+- 下载到 `~/.lmnotes/models/ggml-<name>.bin`，进度条可见。下载源为官方 HuggingFace，不可达时**自动切换 hf-mirror.com 镜像**；30s 无响应快速失败。
 
 **录入流程**：
 
@@ -328,7 +328,7 @@ LMNotes 主窗口采用三栏布局：
 | 类型 | 说明 |
 |---|---|
 | **Ollama（本地）** | id 固定 `ollama`，单实例。字段：Base URL、Chat Model、Embed Model、Embed Dim（默认 768） |
-| **OpenAI 兼容** | 适配 OpenAI / GLM / 其它兼容 API。字段：id、Base URL、API Key、Chat Model、Embed Model、Embed Dim（默认 1024） |
+| **OpenAI 兼容** | 适配 OpenAI / GLM / 其它兼容 API，可**添加/删除多个**（v0.6）。字段：id、Base URL、API Key、Chat Model、Embed Model、Embed Dim（默认 1024）、Transcribe Model（仅此类 provider 显示） |
 
 **默认配置**：一个本地 Ollama（`http://localhost:11434`），chat 用 `qwen2.5:7b`，embed 用 `nomic-embed-text`，五类任务（summarize / link_suggest / embed / chat / rewrite）都路由到 Ollama。
 

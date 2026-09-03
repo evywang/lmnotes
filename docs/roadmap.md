@@ -17,7 +17,7 @@
 | FR-LLM-06 行动项抽取 | P1 | ✅ v0.3.0 | transcript/meeting 笔记一键抽取 checklist |
 | FR-MEDIA-02 图片 OCR / 视觉描述 | P1 | ❌ 未实现 | |
 | FR-CAP-08 模板系统 | P1 | ✅ v0.5.0 | templates/ + {{title}}/{{date}} 等占位符 |
-| 语音遗留(按住说话 / 流式 / 断点续传) | P1 | ❌ | 见 [ADR-0006](adr/ADR-0006-voice-transcription.md) / [ADR-0007](adr/ADR-0007-local-stt-fallback.md) 遗留清单 |
+| 语音遗留(流式转录) | P1 | ❌ | 按住说话 ✅ v0.4.0、模型断点续传 ✅ v0.4.0、多 Provider 云端 STT ✅ v0.6.0;见 [ADR-0006](adr/ADR-0006-voice-transcription.md) / [ADR-0007](adr/ADR-0007-local-stt-fallback.md) |
 | FR-STORE-05 导出 zip / git init | P1 | ✅ v0.5.0 | 流式 zip(排除派生数据) + 探测式 git init |
 | macOS 打包 | — | ✅ v0.5.0 | CI 源码构建 sidecar;无 Apple 账号发未签名 dmg |
 | FR-CAP-09 长音频后台转录 | P2 | ✅ v0.5.0 | 已并入任务队列;本地子进程预算 60s/队列 15min 见 [v0.5.1 设计](superpowers/plans/2026-08-29-v0.5.1-task-cancel-and-timeouts.md) |
@@ -54,6 +54,18 @@
 | FR-CAP-08 模板系统 | `templates/` 目录 + frontmatter 占位符替换 + 新建笔记时选模板 | S | ✅ |
 | FR-STORE-05 导出 zip / git init | 后端命令 + 设置页按钮 | S | ✅ |
 | macOS 打包 | release 矩阵加 `aarch64-apple-darwin` sidecar + 签名公证(需开发者账号) | M | ✅(未签名 dmg 无账号可发) |
+
+### v0.6.0「任务可控与语音打磨」✅ 已实现([v0.5.1 设计](superpowers/plans/2026-08-29-v0.5.1-task-cancel-and-timeouts.md))
+
+> v0.5.1(任务取消+超时预算)与语音可用性修复并入本版交付。
+
+| 功能 | 说明 | 量级 | 状态 |
+|---|---|---|---|
+| **FR-MEDIA-04 收口(v0.5.1)** | running 任务强杀取消(AbortHandle + kill_on_drop + 条件 UPDATE 防竞态);超时预算上移调用点(队列 15min / 内联 60s,云端请求首次有上限) | M | ✅ |
+| 长媒体后台分流(GAP-A) | 拖拽/粘贴与语音弹窗按实际时长探测,>阈值(默认 60s)自动入队;设置页可调阈值/设为全部后台 | M | ✅ |
+| 队列修复包(GAP-B/C + 审计) | 排队视频正确归位 `assets/video/`;重试判定改类型化错误分类(断网真的会重试);ffmpeg kill_on_drop、取消注册表泄漏 | S | ✅ |
+| 语音可用性包 | **Windows 打包版语音修复**(sidecar 平台配置改名 `tauri.*.conf.json` 被 Tauri 2 自动加载);模型下载 404 修复 + hf-mirror 镜像回退 + 30s 超时;弹窗内联下载免重启 | M | ✅ |
+| 多 Provider 云端 STT | 设置页增删 OpenAI 兼容 provider,Transcribe Model 自动派生转录路由(主 LLM 无转录端点时可专配 STT provider) | S | ✅ |
 
 ---
 
