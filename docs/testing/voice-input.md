@@ -108,10 +108,14 @@ cargo test -p lmnotes-desktop --lib -- build_auto_derives build_without explicit
 **方式 A：设置 UI（推荐）**
 
 1. 启动 `cd apps/desktop && npm run tauri dev`。
-2. `Ctrl+,` 打开设置 → 找到 OpenAI 兼容 provider（若无则手动编辑 config.json 加一个，见方式 B）。
-3. 填 **Base URL**（如 `https://api.openai.com/v1`、`https://api.groq.com/openai/v1`）、**API Key**、**Transcribe Model**（如 `whisper-1` / `whisper-large-v3`）。
+2. `Ctrl+,` 打开设置 → 找到 OpenAI 兼容 provider；若无（或主 provider 无转录端点，
+   如智谱 GLM 不提供 `/audio/transcriptions`）→ 点 **「+ 添加 OpenAI 兼容 Provider」**
+   新增一个专供在线 STT 的 provider（如硅基流动 `https://api.siliconflow.cn/v1`）。
+3. 填 **Base URL**（如 `https://api.openai.com/v1`、`https://api.groq.com/openai/v1`）、**API Key**、**Transcribe Model**（如 `whisper-1` / `whisper-large-v3`；硅基流动可填 `FunAudioLLM/SenseVoiceSmall`）。
+   转录模型字段仅对 OpenAI 兼容 provider 显示（Ollama 不支持云端转录）。
 4. 勾选 **允许云端 Provider（默认关闭，本地优先）**。
-5. 保存 → **重启应用**（routing 在启动期 build，需重启生效）。
+5. 保存 → **重启应用**（routing 在启动期 build，需重启生效；转录路由自动派生到
+   第一个填了 Transcribe Model 的 provider，无需手动配 routing）。
 
 **方式 B：直接编辑 `~/.lmnotes/config.json`**
 
@@ -317,29 +321,36 @@ cargo test -p lmnotes-desktop --lib -- build_auto_derives build_without explicit
 
 ---
 
-#### TC-M12 云端不可达 + 本地模型未下载 → 引导下载
+#### TC-M12 云端不可达 + 本地模型未下载 → 弹窗内直接下载
 
 **前置**：断网；本地无任何模型（`~/.lmnotes/models/` 空）。
 
 **步骤**：
-1. `Ctrl+Shift+V` → 录音 → 停止。
+1. `Ctrl+Shift+V` 打开语音弹窗。
 
 **预期**：
-- 错误信息提示"云端不可用且本地未就绪，请到设置下载模型"（`voice.cloudDownNoLocal`）。
-- 用户到 **设置 → 本地 STT** 下载模型后重试即成功。
+- 弹窗打开时即探测本地 STT 就绪状态；引擎在而无模型 → 弹窗内直接内嵌
+  模型下载面板（`voice.localSetupHint` + LocalSttSetup inline 模式），
+  无需先录音失败再跳设置。
+- 在弹窗内下载模型（官方 HuggingFace 不可达时自动切 hf-mirror.com 镜像）。
+- 下载完成 → 面板自动收起 → 直接录音即走本地转录，**无需重启应用**
+  （whisper.cpp 转录时动态解析模型路径）。
+- 兜底：若录音后才发现未就绪（如探测失败），错误路径仍显示
+  `voice.cloudDownNoLocal` + 「打开设置下载模型」按钮跳设置面板。
 
 ---
 
 #### TC-M13 模型下载中断恢复
 
 **步骤**：
-1. 设置 → 本地 STT → 点下载 small（~466MB）。
+1. 设置 → 本地 STT（或语音弹窗内嵌面板）→ 点下载 small（~466MB）。
 2. 下载到一半断网（或等停滞超时：连续 30s 无数据自动判失败）。
 3. 恢复网络，再次点下载（或等待自动重试，单次调用内最多 3 次尝试）。
 
 **预期**：
 - 中断后重试从**断点续传**（HTTP Range，基于 `.part` 已有字节数；进度条从断点处继续而非 0）。
-- 单次下载调用内自动重试最多 3 次（间隔 2s），全部失败才报错；`.part` 保留供下次续传。
+- 单次下载调用内自动重试最多 3 次（间隔 2s）；官方源失败自动切
+  hf-mirror.com 镜像重试；全部失败才报错；`.part` 保留供下次续传。
 - `.part` 比远端文件大（416）时自动丢弃重下。
 - 完整下载完成后 `.part` 重命名为 `ggml-small.bin`，状态刷新为已下载；已下载模型再次点下载幂等返回。
 

@@ -55,6 +55,33 @@ impl WhisperCppProvider {
     pub fn model_path(&self) -> &Path {
         &self.model_path
     }
+
+    /// 实际使用的模型路径：配置路径存在则用之；否则回扫 models/ 里已下载的
+    /// 模型（启动注册时无模型会落到默认 base 路径，用户此后在 UI 下载了
+    /// small/medium 的情况下不必重启应用）。
+    fn effective_model_path(&self) -> PathBuf {
+        resolve_model_path(
+            &self.model_path,
+            crate::commands::preferred_downloaded_model().as_deref(),
+            &crate::commands::models_dir(),
+        )
+    }
+}
+
+/// 纯函数：模型路径决策（便于单测）。
+/// 配置路径存在 → 用；不存在但有已下载模型 → 用已下载者（保持 base 优先的
+/// 选择策略，由调用方传入）；两者皆无 → 返回配置路径（由调用方给出可读错误）。
+fn resolve_model_path(configured: &Path, downloaded: Option<&str>, models_dir: &Path) -> PathBuf {
+    if configured.exists() {
+        return configured.to_path_buf();
+    }
+    if let Some(name) = downloaded {
+        let p = models_dir.join(format!("ggml-{name}.bin"));
+        if p.exists() {
+            return p;
+        }
+    }
+    configured.to_path_buf()
 }
 
 #[async_trait::async_trait]
@@ -68,9 +95,9 @@ impl LlmProvider for WhisperCppProvider {
     fn capabilities(&self) -> Capabilities {
         Capabilities::TRANSCRIBE
     }
-    /// 健康 = 二进制与模型文件都存在。不实际 spawn（避免子进程开销）。
+    /// 健康 = 二进制与（动态解析后的）模型文件都存在。不实际 spawn（避免子进程开销）。
     async fn health(&self) -> Result<bool> {
-        Ok(self.binary_path.exists() && self.model_path.exists())
+        Ok(self.binary_path.exists() && self.effective_model_path().exists())
     }
 }
 
@@ -110,11 +137,19 @@ impl TranscribeCap for WhisperCppProvider {
         }
 
         // 2) 跑 whisper.cpp 子进程。
+        // 模型路径动态解析：启动后经 UI 下载的模型无需重启即可用。
+        let model_path = self.effective_model_path();
+        if !model_path.exists() {
+            return Err(lmnotes_core::CoreError::Conformance(
+                "no whisper model downloaded: download one in the voice popup or settings first"
+                    .into(),
+            ));
+        }
         // 超时归调用点所有（v0.5.1：内联 60s / 队列 15min，见 transcribe_with_fallback）；
         // 此处不再自设上限——调用方超时丢弃 future 时 kill_on_drop 终止子进程。
         let mut cmd = build_whisper_cmd(
             &self.binary_path,
-            &self.model_path,
+            &model_path,
             &wav_path,
             &out_prefix,
             language,
@@ -273,6 +308,37 @@ mod tests {
         assert_eq!(sanitize_ext("rec.webm"), "webm");
         assert_eq!(sanitize_ext("audio.mp4"), "mp4");
         assert_eq!(sanitize_ext("noext"), "bin");
+    }
+
+    #[test]
+    fn resolve_model_path_prefers_existing_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let configured = dir.path().join("ggml-base.bin");
+        std::fs::write(&configured, b"x").unwrap();
+        // 配置路径存在 → 直接用（即使也有已下载模型）。
+        let got = resolve_model_path(&configured, Some("small"), dir.path());
+        assert_eq!(got, configured);
+    }
+
+    #[test]
+    fn resolve_model_path_falls_back_to_downloaded() {
+        // 回归：启动时无模型 → 注册默认 base 路径；用户随后下载 small
+        // → 不重启也应解析到已下载的模型。
+        let dir = tempfile::tempdir().unwrap();
+        let configured = dir.path().join("ggml-base.bin"); // 不存在
+        let downloaded = dir.path().join("ggml-small.bin");
+        std::fs::write(&downloaded, b"x").unwrap();
+        let got = resolve_model_path(&configured, Some("small"), dir.path());
+        assert_eq!(got, downloaded);
+    }
+
+    #[test]
+    fn resolve_model_path_nothing_exists_returns_configured() {
+        // 都不存在 → 返回配置路径（调用方据此报"未下载模型"可读错误）。
+        let dir = tempfile::tempdir().unwrap();
+        let configured = dir.path().join("ggml-base.bin");
+        let got = resolve_model_path(&configured, None, dir.path());
+        assert_eq!(got, configured);
     }
 
     #[test]

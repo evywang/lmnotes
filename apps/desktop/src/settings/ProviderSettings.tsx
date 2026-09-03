@@ -13,7 +13,14 @@ interface ProviderRefSer {
 
 interface Config {
   providers: Array<
-    | { type: "ollama"; base_url: string; chat_model: string; embed_model: string; vision_model?: string }
+    | {
+        type: "ollama";
+        base_url: string;
+        chat_model: string;
+        embed_model: string;
+        embed_dim?: number;
+        vision_model?: string;
+      }
     | {
         type: "openai";
         id: string;
@@ -21,6 +28,7 @@ interface Config {
         api_key: string;
         chat_model: string;
         embed_model: string;
+        embed_dim?: number;
         transcribe_model?: string;
         vision_model?: string;
       }
@@ -31,6 +39,8 @@ interface Config {
     embed?: ProviderRefSer;
     chat?: ProviderRefSer;
     rewrite?: ProviderRefSer;
+    transcribe?: ProviderRefSer;
+    vision?: ProviderRefSer;
   };
   guard: { cloud_allowed: boolean; sensitive_patterns: string[] };
   media: { background_threshold_ms: number };
@@ -74,6 +84,60 @@ export function ProviderSettings(props: { onClose: () => void }) {
     setHealth(h);
   };
 
+  /** 新增 OpenAI 兼容 provider（id 唯一自动生成；Ollama 单实例不加）。
+   *  典型场景：主 LLM 用 GLM（无转录端点），另加一个支持
+   *  /audio/transcriptions 的服务（如硅基流动/OpenAI）专供在线 STT。 */
+  const addProvider = () => {
+    const cfg = config();
+    if (!cfg) return;
+    const ids = new Set(
+      cfg.providers.map((p) => (p.type === "openai" ? p.id : "")).filter(Boolean),
+    );
+    let n = cfg.providers.length + 1;
+    let id = `cloud-${n}`;
+    while (ids.has(id)) {
+      n += 1;
+      id = `cloud-${n}`;
+    }
+    setConfig({
+      ...cfg,
+      providers: [
+        ...cfg.providers,
+        {
+          type: "openai",
+          id,
+          base_url: "",
+          api_key: "",
+          chat_model: "",
+          embed_model: "",
+        },
+      ],
+    });
+  };
+
+  /** 移除 provider（仅 OpenAI 兼容类）并清掉指向它的 routing 引用，防悬空。 */
+  const removeProvider = (idx: number) => {
+    const cfg = config();
+    if (!cfg) return;
+    const pid = cfg.providers[idx].type === "openai" ? cfg.providers[idx].id : null;
+    const strip = (r?: ProviderRefSer): ProviderRefSer | undefined =>
+      pid && r?.provider === pid ? undefined : r;
+    setConfig({
+      ...cfg,
+      providers: cfg.providers.filter((_, i) => i !== idx),
+      routing: {
+        ...cfg.routing,
+        summarize: strip(cfg.routing.summarize),
+        link_suggest: strip(cfg.routing.link_suggest),
+        embed: strip(cfg.routing.embed),
+        chat: strip(cfg.routing.chat),
+        rewrite: strip(cfg.routing.rewrite),
+        transcribe: strip(cfg.routing.transcribe),
+        vision: strip(cfg.routing.vision),
+      },
+    });
+  };
+
   return (
     <div class="capture-overlay" onClick={props.onClose}>
       <div class="settings-box" onClick={(e) => e.stopPropagation()}>
@@ -110,16 +174,28 @@ export function ProviderSettings(props: { onClose: () => void }) {
               <For each={cfg().providers}>
                 {(p, i) => (
                   <div class="provider-block">
-                    <h3>
-                      {p.type === "ollama"
-                        ? t("settings.ollamaLocal")
-                        : t("settings.openaiCompat", { id: (p as { id: string }).id })}
-                    </h3>
+                    <div class="provider-header">
+                      <h3>
+                        {p.type === "ollama"
+                          ? t("settings.ollamaLocal")
+                          : t("settings.openaiCompat", { id: (p as { id: string }).id })}
+                      </h3>
+                      <Show when={p.type === "openai"}>
+                        <button
+                          type="button"
+                          class="btn-secondary btn-small"
+                          onClick={() => removeProvider(i())}
+                        >
+                          {t("settings.removeProvider")}
+                        </button>
+                      </Show>
+                    </div>
                     <label>
                       Base URL
                       <input
                         type="text"
                         value={p.base_url}
+                        placeholder="https://api.openai.com/v1"
                         onInput={(e) => {
                           const next = [...cfg().providers];
                           next[i()] = { ...p, base_url: e.currentTarget.value } as typeof p;
@@ -182,26 +258,33 @@ export function ProviderSettings(props: { onClose: () => void }) {
                         }}
                       />
                     </label>
-                    <label>
-                      {t("settings.transcribeModel")}
-                      <input
-                        type="text"
-                        value={(p as { transcribe_model?: string }).transcribe_model ?? ""}
-                        placeholder={t("settings.transcribeModelPlaceholder")}
-                        onInput={(e) => {
-                          const next = [...cfg().providers];
-                          const v = e.currentTarget.value.trim();
-                          next[i()] = {
-                            ...p,
-                            transcribe_model: v === "" ? undefined : v,
-                          } as typeof p;
-                          setConfig({ ...cfg(), providers: next });
-                        }}
-                      />
-                    </label>
+                    <Show when={p.type === "openai"}>
+                      <label>
+                        {t("settings.transcribeModel")}
+                        <input
+                          type="text"
+                          value={(p as { transcribe_model?: string }).transcribe_model ?? ""}
+                          placeholder={t("settings.transcribeModelPlaceholder")}
+                          onInput={(e) => {
+                            const next = [...cfg().providers];
+                            const v = e.currentTarget.value.trim();
+                            next[i()] = {
+                              ...p,
+                              transcribe_model: v === "" ? undefined : v,
+                            } as typeof p;
+                            setConfig({ ...cfg(), providers: next });
+                          }}
+                        />
+                      </label>
+                      <p class="muted small">{t("settings.transcribeModelHint")}</p>
+                    </Show>
                   </div>
                 )}
               </For>
+
+              <button type="button" class="btn-secondary" onClick={addProvider}>
+                + {t("settings.addProvider")}
+              </button>
 
               <div class="health-section">
                 <h3>{t("settings.health")}</h3>

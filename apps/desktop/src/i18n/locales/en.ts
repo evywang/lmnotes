@@ -55,6 +55,7 @@ export const en = {
   "editor.mediaQueued": "Queued for background transcription (⏳ Tasks).",
   "voice.cloudDownNoLocal": "Cloud transcribe unavailable and no local STT ready. You can download a local model to enable offline fallback.",
   "voice.openSettings": "Open settings to download a model",
+  "voice.localSetupHint": "No local model yet. Download one to transcribe offline (automatic fallback when cloud is down) — no restart needed:",
 
   // ── Local STT (whisper.cpp fallback, ADR-0007) ────────────────────────
   "localStt.title": "🎙️ Local STT (offline fallback)",
@@ -140,6 +141,9 @@ export const en = {
   "settings.cloudAllowed": "Allow cloud providers (off by default, local first)",
   "settings.transcribeModel": "Transcribe Model (optional)",
   "settings.transcribeModelPlaceholder": "e.g. whisper-1 (enables voice input)",
+  "settings.transcribeModelHint": "Requires an endpoint with the Whisper-compatible /audio/transcriptions API (e.g. OpenAI, SiliconFlow; Zhipu GLM does not offer one). If your main provider lacks it, add a dedicated one for online STT.",
+  "settings.addProvider": "Add OpenAI-compatible provider",
+  "settings.removeProvider": "Remove",
   "settings.visionModel": "Vision Model (optional)",
   "settings.visionModelPlaceholder": "e.g. gpt-4o-mini / llava (describes pasted images)",
   "settings.backgroundMedia": "Transcribe all media in the background",

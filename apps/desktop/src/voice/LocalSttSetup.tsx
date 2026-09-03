@@ -2,7 +2,8 @@
  * 本地 STT（whisper.cpp）设置面板（ADR-0007）。
  *
  * 显示 whisper.cpp / ffmpeg sidecar 状态、已下载模型、可下载模型列表与进度。
- * 挂在 ProviderSettings 内。语音浮窗在云端不可达且本地未就绪时也会引导用户来此。
+ * 两个挂载点：ProviderSettings（设置页，完整模式）与 VoiceCapture（语音弹窗，
+ * inline 模式——无标题/描述，弹窗自带引导文案）。
  *
  * 后端命令：
  *   get_local_stt_status -> { binary_available, ffmpeg_available, models: string[] }
@@ -43,7 +44,7 @@ interface ProgressEvent {
   done?: boolean;
 }
 
-export function LocalSttSetup() {
+export function LocalSttSetup(props: { inline?: boolean }) {
   const [status, setStatus] = createSignal<LocalSttStatus | null>(null);
   const [models, setModels] = createSignal<WhisperModel[]>([]);
   const [downloading, setDownloading] = createSignal<string | null>(null);
@@ -101,8 +102,10 @@ export function LocalSttSetup() {
 
   return (
     <div class="local-stt-section">
-      <h3>{t("localStt.title")}</h3>
-      <p class="muted small">{t("localStt.description")}</p>
+      <Show when={!props.inline}>
+        <h3>{t("localStt.title")}</h3>
+        <p class="muted small">{t("localStt.description")}</p>
+      </Show>
 
       <div class="local-stt-status">
         <div>

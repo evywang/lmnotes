@@ -1,22 +1,33 @@
 /**
  * 语音输入浮窗（FR-CAP-05 + FR-MEDIA-01）。
  *
+ * 打开时即探测本地 STT 就绪状态（get_local_stt_status）：引擎在而无模型 →
+ * 直接在弹窗内嵌模型下载面板（LocalSttSetup inline），下载完即可离线转录，
+ * 不必先跳设置页（下载后模型路径动态解析，无需重启）。
+ *
  * 点击开始录音（getUserMedia + MediaRecorder），再点击停止 → 上传音频 bytes
  * 到 create_voice_note 命令（归档 + 云端 Whisper 转录 + 写 transcript concept）→
  * onNavigate 打开生成的笔记。
  *
  * 仿 Capture.tsx 的 overlay/signal 模式。无独立快捷窗场景：onNavigate 由父级传入。
  * Esc：录音中 = 取消录音（不转录）并关闭；空闲 = 直接关闭。
- * 转录失败且本地 STT 未就绪时，引导用户去设置下载模型（ADR-0007 §7 / 计划 T8）。
+ * 转录失败且本地 STT 未就绪时，兜底引导用户去设置下载模型（ADR-0007 §7 / 计划 T8）。
  */
 import { createSignal, Show, onCleanup } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { t } from "../i18n";
+import { LocalSttSetup } from "./LocalSttSetup";
 
 interface LocalSttStatus {
   binary_available: boolean;
   ffmpeg_available: boolean;
   models: string[];
+}
+
+interface ModelProgressEvent {
+  name: string;
+  done?: boolean;
 }
 
 export function VoiceCapture(props: {
@@ -31,6 +42,24 @@ export function VoiceCapture(props: {
   const [error, setError] = createSignal<string | null>(null);
   const [needsLocalSetup, setNeedsLocalSetup] = createSignal(false);
   const [queued, setQueued] = createSignal(false); // 长录音已入队（任务中心可查，v0.5 分流）
+  // null = 探测中；true = 本地就绪；false = 引擎在但无模型 → 弹窗内嵌下载面板
+  const [localReady, setLocalReady] = createSignal<boolean | null>(null);
+
+  const probeLocal = async () => {
+    try {
+      const st = await invoke<LocalSttStatus>("get_local_stt_status");
+      setLocalReady(st.binary_available && st.models.length > 0);
+    } catch {
+      setLocalReady(true); // 探测失败不阻塞录音（云端可用时仍可录）
+    }
+  };
+  void probeLocal();
+  // 模型下载完成 → 重新探测（面板消失，录音走本地无需重启）。
+  let unlistenModel: UnlistenFn | null = null;
+  void listen<ModelProgressEvent>("whisper-model-progress", (ev) => {
+    if (ev.payload.done) void probeLocal();
+  }).then((fn) => (unlistenModel = fn));
+  onCleanup(() => unlistenModel?.());
 
   let recorder: MediaRecorder | null = null;
   let chunks: BlobPart[] = [];
@@ -193,6 +222,11 @@ export function VoiceCapture(props: {
 
         <Show when={queued()}>
           <p class="muted small">{t("voice.queuedHint")}</p>
+        </Show>
+
+        <Show when={localReady() === false}>
+          <p class="muted small">{t("voice.localSetupHint")}</p>
+          <LocalSttSetup inline />
         </Show>
 
         <Show

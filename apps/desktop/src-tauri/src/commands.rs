@@ -2205,8 +2205,10 @@ pub struct LocalSttStatus {
 
 /// 内置模型清单（MVP 只列 base/small/medium；large 留后续）。
 /// 推荐语文案在前端 i18n（localStt.modelNote.<name>），后端只出结构化字段。
+/// 模型仓：ggerganov/whisper.cpp——GitHub 仓库虽已迁至 ggml-org，但 HF 模型仓
+/// 仍是 ggerganov（ggml-org/whisper.cpp 在 HF 上 404，勿改回）。
 fn builtin_whisper_models() -> Vec<WhisperModel> {
-    let base = "https://huggingface.co/ggml-org/whisper.cpp/resolve/main";
+    let base = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
     vec![
         WhisperModel {
             name: "base".into(),
@@ -2444,6 +2446,7 @@ fn resolve_sidecar(name: &str) -> Option<PathBuf> {
 
 /// 下载 whisper.cpp 模型到 ~/.lmnotes/models/。
 /// 断点续传（HTTP Range）+ 最多 3 次重试 + 30s 停滞超时（ADR-0007 §缓解）。
+/// 官方 HuggingFace 不可达时自动切 hf-mirror.com 镜像（内容同源、支持 Range）。
 /// 流式下载，定期 emit 进度事件 `whisper-model-progress`。返回本地模型文件路径。
 #[tauri::command]
 pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Result<String, String> {
@@ -2474,13 +2477,20 @@ pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Resu
         .map_err(|e| e.to_string())?;
 
     const MAX_ATTEMPTS: u32 = 3;
+    let urls = download_urls(&model.url);
     let stall = std::time::Duration::from_secs(30);
     let mut last_err = String::new();
     for attempt in 1..=MAX_ATTEMPTS {
-        match download_attempt(&client, &model.url, &tmp, &dest, &name, &app, stall).await {
+        // 官方源先行；重试切镜像（HF 不可达网络下 15s 连接超时只耗一次）。
+        let url = if attempt == 1 {
+            &urls[0]
+        } else {
+            urls.last().expect("download_urls 非空")
+        };
+        match download_attempt(&client, url, &tmp, &dest, &name, &app, stall).await {
             Ok(path) => return Ok(path),
             Err(e) => {
-                eprintln!("whisper model download attempt {attempt}/{MAX_ATTEMPTS} failed: {e}");
+                eprintln!("whisper model download attempt {attempt}/{MAX_ATTEMPTS} from {url} failed: {e}");
                 last_err = e;
                 // 失败保留 .part：下次尝试（或下次下载请求）从断点续传。
                 if attempt < MAX_ATTEMPTS {
@@ -2490,6 +2500,18 @@ pub async fn download_whisper_model(name: String, app: tauri::AppHandle) -> Resu
         }
     }
     Err(last_err)
+}
+
+/// 模型下载候选源：官方 HuggingFace + hf-mirror.com 镜像。
+/// huggingface.co 在部分网络（如中国大陆）整体不可达；hf-mirror.com 为同源
+/// 只读镜像（支持 Range 断点续传）。非 HF 源不加镜像，原样返回。
+fn download_urls(official: &str) -> Vec<String> {
+    let mirror = official.replacen("https://huggingface.co", "https://hf-mirror.com", 1);
+    if mirror != official {
+        vec![official.to_string(), mirror]
+    } else {
+        vec![official.to_string()]
+    }
 }
 
 /// 单次下载尝试：按已有 .part 大小发 Range 续传；连续 30s 无数据视为停滞失败。
@@ -2507,31 +2529,14 @@ async fn download_attempt(
 
     // 断点：已有 .part 的字节数。
     let mut start: u64 = tokio::fs::metadata(tmp).await.map(|m| m.len()).unwrap_or(0);
-    let mut resp = if start > 0 {
-        client
-            .get(url)
-            .header(reqwest::header::RANGE, format!("bytes={start}-"))
-            .send()
-            .await
-            .map_err(|e| format!("download request: {e}"))?
-    } else {
-        client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("download request: {e}"))?
-    };
+    let mut resp = send_download_get(client, url, start).await?;
     if resp.status() == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
         // .part 比远端文件大（损坏/上游变更）：丢弃从头下。
         tokio::fs::remove_file(tmp)
             .await
             .map_err(|e| e.to_string())?;
         start = 0;
-        resp = client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| format!("download request: {e}"))?;
+        resp = send_download_get(client, url, 0).await?;
     }
     if !resp.status().is_success() {
         return Err(format!("download HTTP {}", resp.status()));
@@ -2592,13 +2597,68 @@ async fn download_attempt(
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// 发下载 GET（可带 Range 续传头），响应阶段整体限时 30s。
+/// connect_timeout 只覆盖 TCP/TLS 建连；被墙网络常见"建连成功后握手/响应静默
+/// 丢弃"，send() 会无限挂起（UI 表现为点击下载无任何反应），故显式限时。
+async fn send_download_get(
+    client: &reqwest::Client,
+    url: &str,
+    range_from: u64,
+) -> Result<reqwest::Response, String> {
+    let mut req = client.get(url);
+    if range_from > 0 {
+        req = req.header(reqwest::header::RANGE, format!("bytes={range_from}-"));
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(30), req.send())
+        .await
+        .map_err(|_| format!("download request stalled: no response within 30s from {url}"))?
+        .map_err(|e| format!("download request: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        build_extract_audio_cmd, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
-        render_template_placeholders,
+        build_extract_audio_cmd, builtin_whisper_models, download_urls, media_kind_dir,
+        parse_snapshot_ts, pick_preferred_model, render_template_placeholders,
     };
     use chrono::TimeZone;
+
+    #[test]
+    fn builtin_models_use_ggerganov_repo() {
+        // 回归：ggml-org/whisper.cpp 在 HF 上不存在（404，实测）；正确模型仓为
+        // ggerganov/whisper.cpp（GitHub 组织虽迁移，HF 模型仓未迁）。
+        for m in builtin_whisper_models() {
+            assert!(
+                m.url
+                    .starts_with("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"),
+                "bad url: {}",
+                m.url
+            );
+        }
+    }
+
+    #[test]
+    fn download_urls_adds_hf_mirror_fallback() {
+        let urls = download_urls(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin",
+        );
+        assert_eq!(urls.len(), 2);
+        assert_eq!(
+            urls[0],
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        );
+        assert_eq!(
+            urls[1],
+            "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+        );
+    }
+
+    #[test]
+    fn download_urls_leaves_non_hf_source_alone() {
+        // 用户自定义/非 HF 源不加镜像（镜像只同源 HF 内容）。
+        let urls = download_urls("https://example.com/model.bin");
+        assert_eq!(urls, vec!["https://example.com/model.bin".to_string()]);
+    }
 
     #[test]
     fn media_kind_dir_buckets_by_mime() {

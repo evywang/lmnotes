@@ -756,6 +756,21 @@ body {
   margin: 0 0 0.5rem 0;
   font-size: 0.9rem;
 }
+/* provider 标题行：标题 + 移除按钮（openai 兼容类） */
+.provider-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+}
+.provider-header h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.9rem;
+}
+.btn-small {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
 .provider-block label,
 .guard-section label {
   display: flex;

@@ -56,6 +56,7 @@ export const zh: Record<MessageKey, string> = {
   "editor.mediaQueued": "已加入后台队列转录（⏳ 任务可查）。",
   "voice.cloudDownNoLocal": "云端转录不可用且本地未就绪。可下载一个本地模型，启用离线降级。",
   "voice.openSettings": "打开设置下载模型",
+  "voice.localSetupHint": "尚无本地模型。下载后即可离线转录（云端不可用时自动降级），无需重启：",
 
   // ── 本地 STT（whisper.cpp 降级，ADR-0007）─────────────────────────────
   "localStt.title": "🎙️ 本地 STT（离线降级）",
@@ -141,6 +142,9 @@ export const zh: Record<MessageKey, string> = {
   "settings.cloudAllowed": "允许云端 Provider（默认关闭，本地优先）",
   "settings.transcribeModel": "转录模型（可选）",
   "settings.transcribeModelPlaceholder": "如 whisper-1（填后启用语音输入）",
+  "settings.transcribeModelHint": "需端点支持 Whisper 兼容接口 /audio/transcriptions（如 OpenAI、硅基流动；智谱 GLM 不支持）。主 Provider 无此端点时，可新增一个专门用于在线转录。",
+  "settings.addProvider": "添加 OpenAI 兼容 Provider",
+  "settings.removeProvider": "移除",
   "settings.visionModel": "视觉模型（可选）",
   "settings.visionModelPlaceholder": "如 gpt-4o-mini / llava（粘贴图片自动生成描述）",
   "settings.backgroundMedia": "所有媒体转录入队后台处理",
