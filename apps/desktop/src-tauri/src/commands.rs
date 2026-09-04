@@ -7,7 +7,7 @@
 
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::graph::{self, EdgeKind, GraphData};
-use lmnotes_core::index::schema::{filter_titles, NoteTitleHit};
+use lmnotes_core::index::schema::{filter_titles, ConceptRow, NoteTitleHit};
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
 use lmnotes_core::indexer::Indexer;
@@ -138,6 +138,16 @@ pub async fn save_concept(
     Ok(())
 }
 
+/// 每日笔记 bundle-relative 路径：notes/daily/YYYY-MM-DD.md（v0.7 FR-SEARCH-05 抽出共享）。
+fn daily_note_rel(date: &str) -> String {
+    format!("notes/daily/{date}.md")
+}
+
+/// 每日笔记初始内容（OKF frontmatter：type: daily，title = 日期）。
+fn daily_header(date: &str, id: &str) -> String {
+    format!("---\ntype: daily\nid: {id}\ntitle: {date}\n---\n\n# {date}\n\n")
+}
+
 /// 快速捕获：写入当日 daily note（不存在则创建）。
 /// 返回 daily note 的相对路径，便于前端打开。
 #[tauri::command]
@@ -145,16 +155,13 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
     use chrono::Utc;
     let root = vault_root();
     let date = Utc::now().format("%Y-%m-%d").to_string();
-    let daily_path = format!("notes/daily/{date}.md");
+    let daily_path = daily_note_rel(&date);
     let full = root.join(&daily_path);
 
     // 若不存在，创建带 frontmatter 的 daily note
     if !full.exists() {
         let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
-        let header = format!(
-            "---\ntype: daily\nid: {id}\ntitle: {date}\n---\n\n# {date}\n\n",
-            date = date
-        );
+        let header = daily_header(&date, &id);
         if let Some(p) = full.parent() {
             tokio::fs::create_dir_all(p)
                 .await
@@ -177,6 +184,90 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     Ok(daily_path)
+}
+
+/// 今日笔记（v0.7 FR-SEARCH-05）：不存在则创建，幂等不覆盖已有内容。
+/// 返回相对路径供前端打开。与 quick_capture 共用 daily_note_rel/daily_header。
+#[tauri::command]
+pub async fn open_or_create_daily() -> Result<String, String> {
+    use chrono::Utc;
+    let root = vault_root();
+    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let daily_path = daily_note_rel(&date);
+    let full = root.join(&daily_path);
+    if !full.exists() {
+        let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+        let header = daily_header(&date, &id);
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, header)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(daily_path)
+}
+
+/// 时间线条目（FR-SEARCH-05）：前端展示所需字段子集。
+#[derive(serde::Serialize)]
+pub struct TimelineEntry {
+    pub path: String,
+    pub title: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub mtime: i64,
+}
+
+impl From<ConceptRow> for TimelineEntry {
+    fn from(r: ConceptRow) -> Self {
+        Self {
+            path: r.path,
+            title: r.title,
+            type_: r.type_,
+            mtime: r.mtime,
+        }
+    }
+}
+
+/// 标签计数（FR-SEARCH-05）：标签云数据。
+#[derive(serde::Serialize)]
+pub struct TagCount {
+    pub tag: String,
+    pub count: i64,
+}
+
+/// 时间线（FR-SEARCH-05）：最近变更笔记，mtime 降序。
+#[tauri::command]
+pub fn list_timeline(
+    limit: Option<usize>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<TimelineEntry>, String> {
+    let rows = sqlite
+        .list_timeline(limit.unwrap_or(200))
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(TimelineEntry::from).collect())
+}
+
+/// 标签云（FR-SEARCH-05）：全部标签及笔记数，count 降序。
+#[tauri::command]
+pub fn list_tags(sqlite: State<'_, Arc<SqliteIndex>>) -> Result<Vec<TagCount>, String> {
+    let counts = sqlite.tag_counts().map_err(|e| e.to_string())?;
+    Ok(counts
+        .into_iter()
+        .map(|(tag, count)| TagCount { tag, count })
+        .collect())
+}
+
+/// 按标签过滤笔记（FR-SEARCH-05）。
+#[tauri::command]
+pub fn list_notes_with_tag(
+    tag: String,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<TimelineEntry>, String> {
+    let rows = sqlite.notes_with_tag(&tag).map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(TimelineEntry::from).collect())
 }
 
 /// 插入图片：按 SHA-256 哈希存 assets/img/<前2位>/<hash>.<ext>（去重）。
@@ -2618,10 +2709,42 @@ async fn send_download_get(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_extract_audio_cmd, builtin_whisper_models, download_urls, media_kind_dir,
-        parse_snapshot_ts, pick_preferred_model, render_template_placeholders,
+        build_extract_audio_cmd, builtin_whisper_models, daily_header, daily_note_rel,
+        download_urls, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
+        render_template_placeholders, TimelineEntry,
     };
     use chrono::TimeZone;
+    use lmnotes_core::index::schema::ConceptRow;
+
+    #[test]
+    fn daily_note_rel_and_header_shape() {
+        // v0.7 FR-SEARCH-05：daily 路径固定；frontmatter 必须含 type: daily（OKF 约定值）。
+        assert_eq!(daily_note_rel("2026-09-04"), "notes/daily/2026-09-04.md");
+        let h = daily_header("2026-09-04", "nt_test");
+        assert!(h.starts_with("---\ntype: daily\n"));
+        assert!(h.contains("id: nt_test\n"));
+        assert!(h.contains("title: 2026-09-04\n"));
+        assert!(h.trim_end().ends_with("# 2026-09-04"));
+    }
+
+    #[test]
+    fn timeline_entry_maps_row_fields() {
+        let row = ConceptRow {
+            id: "nt_x".into(),
+            path: "notes/x.md".into(),
+            type_: "daily".into(),
+            title: None,
+            mtime: 42,
+            content_hash: "h".into(),
+            aliases: vec![],
+            tags: vec!["t".into()],
+        };
+        let e = TimelineEntry::from(row);
+        assert_eq!(e.path, "notes/x.md");
+        assert_eq!(e.type_, "daily");
+        assert_eq!(e.mtime, 42);
+        assert!(e.title.is_none());
+    }
 
     #[test]
     fn builtin_models_use_ggerganov_repo() {
