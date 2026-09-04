@@ -206,4 +206,20 @@ export const zh: Record<MessageKey, string> = {
   "graph.semanticEdge": "语义近邻",
   "graph.nodes": "节点",
   "graph.edges": "边",
+
+  // ── 命令面板（FR-SEARCH-01，v0.7）─────────────────────────────────────
+  "palette.placeholder": "搜索笔记或执行命令…",
+  "palette.sectionCommands": "命令",
+  "palette.sectionRecent": "最近打开",
+  "palette.sectionNotes": "笔记",
+  "palette.noResults": "无匹配结果",
+  "palette.newNote": "新建笔记",
+  "palette.quickCapture": "快速捕获",
+  "palette.voice": "语音输入",
+  "palette.chat": "Chat with Vault",
+  "palette.graph": "知识图谱",
+  "palette.timeline": "时间线",
+  "palette.daily": "今日笔记",
+  "palette.settings": "设置",
+  "palette.tasks": "媒体任务中心",
 };

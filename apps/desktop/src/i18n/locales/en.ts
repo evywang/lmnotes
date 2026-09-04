@@ -207,6 +207,22 @@ export const en = {
   "graph.semanticEdge": "Semantic neighbor",
   "graph.nodes": "nodes",
   "graph.edges": "edges",
+
+  // ── Command palette (FR-SEARCH-01, v0.7) ─────────────────────────────
+  "palette.placeholder": "Search notes or run a command…",
+  "palette.sectionCommands": "Commands",
+  "palette.sectionRecent": "Recently opened",
+  "palette.sectionNotes": "Notes",
+  "palette.noResults": "No matches",
+  "palette.newNote": "New note",
+  "palette.quickCapture": "Quick capture",
+  "palette.voice": "Voice input",
+  "palette.chat": "Chat with Vault",
+  "palette.graph": "Knowledge graph",
+  "palette.timeline": "Timeline",
+  "palette.daily": "Today's daily note",
+  "palette.settings": "Settings",
+  "palette.tasks": "Media task center",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;
