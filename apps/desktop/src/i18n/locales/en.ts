@@ -223,6 +223,18 @@ export const en = {
   "palette.daily": "Today's daily note",
   "palette.settings": "Settings",
   "palette.tasks": "Media task center",
+
+  // ── Timeline / daily note / tags (FR-SEARCH-05, v0.7) ────────────────
+  "app.dailyBtn": "📅 Today",
+  "app.dailyTooltip": "Open or create today's daily note",
+  "app.timelineBtn": "🕘 Timeline",
+  "timeline.title": "🕘 Timeline (recent changes)",
+  "timeline.titleTagPrefix": "Tag: ",
+  "timeline.today": "Today",
+  "timeline.yesterday": "Yesterday",
+  "timeline.empty": "No notes yet",
+  "tags.section": "Tags",
+  "tags.empty": "No tags yet",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

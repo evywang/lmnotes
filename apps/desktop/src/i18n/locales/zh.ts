@@ -222,4 +222,16 @@ export const zh: Record<MessageKey, string> = {
   "palette.daily": "今日笔记",
   "palette.settings": "设置",
   "palette.tasks": "媒体任务中心",
+
+  // ── 时间线 / 每日笔记 / 标签（FR-SEARCH-05，v0.7）────────────────────
+  "app.dailyBtn": "📅 今日",
+  "app.dailyTooltip": "打开或创建今日 daily note",
+  "app.timelineBtn": "🕘 时间线",
+  "timeline.title": "🕘 时间线（最近变更）",
+  "timeline.titleTagPrefix": "标签：",
+  "timeline.today": "今天",
+  "timeline.yesterday": "昨天",
+  "timeline.empty": "暂无笔记",
+  "tags.section": "标签",
+  "tags.empty": "暂无标签",
 };

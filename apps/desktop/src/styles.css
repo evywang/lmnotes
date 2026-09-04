@@ -1518,3 +1518,45 @@ body {
   opacity: 0.6;
   margin: 0;
 }
+
+/* ── 时间线 / 标签云（FR-SEARCH-05，v0.7）──────────────────────────── */
+.timeline-panel {
+  max-height: 70vh;
+}
+.timeline-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.7rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border, #ccc);
+}
+.tag-cloud {
+  margin-top: 0.4rem;
+}
+.tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.2rem 0;
+}
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #ccc);
+  background: none;
+  color: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.tag-pill:hover {
+  border-color: var(--accent, #4a7dff);
+}
+.tag-count {
+  opacity: 0.55;
+  font-size: 0.68rem;
+}

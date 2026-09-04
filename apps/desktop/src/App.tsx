@@ -13,6 +13,8 @@ import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
 import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
+import { TimelineView } from "./components/TimelineView";
+import { TagCloud } from "./components/TagCloud";
 import { t } from "./i18n";
 
 /** 侧栏当前库指示（v0.4 多库）：显示库名，点击打开设置切换。 */
@@ -43,6 +45,8 @@ export function App() {
   const [chatOpen, setChatOpen] = createSignal(false);
   const [graphOpen, setGraphOpen] = createSignal(false);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [timelineOpen, setTimelineOpen] = createSignal(false);
+  const [tagFilter, setTagFilter] = createSignal<string | null>(null);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
   const [treeOpen, setTreeOpen] = createSignal(false);
 
@@ -144,6 +148,23 @@ export function App() {
     }
   };
 
+  // 今日笔记（FR-SEARCH-05）：幂等打开/创建，侧栏按钮与命令面板共用。
+  const openDaily = async () => {
+    try {
+      const path = await invoke<string>("open_or_create_daily");
+      setActivePath(path);
+      setTreeRefresh((n) => n + 1);
+    } catch (e) {
+      console.error("open daily", e);
+    }
+  };
+
+  // 打开时间线（FR-SEARCH-05）：tag 为空 = 全量时间线，非空 = 标签过滤列表。
+  const openTimeline = (tag: string | null) => {
+    setTagFilter(tag);
+    setTimelineOpen(true);
+  };
+
   // 命令面板动作表（FR-SEARCH-01）：标签走 i18n，执行闭包复用既有入口。
   const paletteActions = (): PaletteAction[] => [
     { id: "new-note", icon: "📝", label: t("palette.newNote"), run: () => void createNote() },
@@ -151,22 +172,8 @@ export function App() {
     { id: "voice", icon: "🎤", label: t("palette.voice"), run: () => setVoiceOpen(true) },
     { id: "chat", icon: "💬", label: t("palette.chat"), run: () => setChatOpen(true) },
     { id: "graph", icon: "🕸", label: t("palette.graph"), run: () => setGraphOpen(true) },
-    {
-      id: "daily",
-      icon: "📅",
-      label: t("palette.daily"),
-      run: () => {
-        void (async () => {
-          try {
-            const path = await invoke<string>("open_or_create_daily");
-            setActivePath(path);
-            setTreeRefresh((n) => n + 1);
-          } catch (e) {
-            console.error("open daily", e);
-          }
-        })();
-      },
-    },
+    { id: "timeline", icon: "🕘", label: t("palette.timeline"), run: () => openTimeline(null) },
+    { id: "daily", icon: "📅", label: t("palette.daily"), run: () => void openDaily() },
     { id: "tasks", icon: "⏳", label: t("palette.tasks"), run: () => openMediaTasks() },
     { id: "settings", icon: "⚙", label: t("palette.settings"), run: () => setSettingsOpen(true) },
   ];
@@ -205,6 +212,13 @@ export function App() {
           <button class="chat-btn" onClick={() => setGraphOpen(true)}>
             {t("app.graphBtn")}
           </button>
+          <button class="chat-btn" onClick={() => void openDaily()} title={t("app.dailyTooltip")}>
+            {t("app.dailyBtn")}
+          </button>
+          <button class="chat-btn" onClick={() => openTimeline(null)}>
+            {t("app.timelineBtn")}
+          </button>
+          <TagCloud onPick={(tag) => openTimeline(tag)} />
           <Show when={searching()}>
             <p class="muted">{t("app.searching")}</p>
           </Show>
@@ -302,6 +316,16 @@ export function App() {
           onNavigate={(path) => {
             setActivePath(path);
             setGraphOpen(false);
+          }}
+        />
+      </Show>
+      <Show when={timelineOpen()}>
+        <TimelineView
+          tag={tagFilter()}
+          onClose={() => setTimelineOpen(false)}
+          onOpen={(path) => {
+            setActivePath(path);
+            setTimelineOpen(false);
           }}
         />
       </Show>
