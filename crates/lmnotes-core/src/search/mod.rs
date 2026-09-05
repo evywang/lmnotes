@@ -104,7 +104,11 @@ pub fn make_snippet(body: &str, query: &str, max_chars: usize) -> String {
     let candidates: Vec<String> = {
         let q = query.trim().to_lowercase();
         let mut v = vec![q.clone()];
-        v.extend(q.split_whitespace().map(|s| s.to_string()).collect::<Vec<_>>());
+        v.extend(
+            q.split_whitespace()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
+        );
         v.retain(|s| !s.is_empty());
         v
     };
@@ -163,7 +167,9 @@ mod tests {
 
     #[test]
     fn snippet_windows_around_chinese_hit() {
-        let body = "前奏".repeat(50).as_str().to_string() + "注意力机制是深度学习的关键" + &"后缀".repeat(50);
+        let body = "前奏".repeat(50).as_str().to_string()
+            + "注意力机制是深度学习的关键"
+            + &"后缀".repeat(50);
         let s = make_snippet(&body, "注意力", 40);
         assert!(s.contains("注意力"), "{s}");
         assert!(s.starts_with('…'), "起始被截应有省略号：{s}");

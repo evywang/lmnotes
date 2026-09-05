@@ -3,15 +3,16 @@
 //!
 //! 数据安全三件套的最后一块：派生数据可重建（删 .lmnotes/）、手动导出
 //! （v0.5）之后，本模块补上「不依赖用户记忆的定时副本」。
+//!
+//! 文件 IO 属 Tauri 壳层职责（ADR-0002 豁免区，同 commands.rs）。
+
+#![allow(clippy::disallowed_methods)]
 
 use std::path::{Path, PathBuf};
 
 /// 备份文件名：`lmnotes-<vault 名>-<YYYYMMDD-HHMMSS>.zip`（字典序即时间序）。
 pub fn backup_file_name(vault_name: &str, ts: chrono::DateTime<chrono::Utc>) -> String {
-    format!(
-        "lmnotes-{vault_name}-{}.zip",
-        ts.format("%Y%m%d-%H%M%S")
-    )
+    format!("lmnotes-{vault_name}-{}.zip", ts.format("%Y%m%d-%H%M%S"))
 }
 
 /// 默认备份目录：`~/.lmnotes/backups/<vault 名>`。
@@ -84,8 +85,8 @@ pub fn zip_vault_to(
     }
     let file = std::fs::File::create(dest).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipWriter::new(file);
-    let opts =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
     let total = files.len() as u64;
     for (i, abs) in files.iter().enumerate() {
         let rel = abs
@@ -145,9 +146,7 @@ pub fn spawn_backup_task(app: tauri::AppHandle) {
                 .as_ref()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| default_dest_dir(&root));
-            match tokio::task::spawn_blocking(move || run_backup_once(&root, &dest, keep))
-                .await
-            {
+            match tokio::task::spawn_blocking(move || run_backup_once(&root, &dest, keep)).await {
                 Ok(Ok((path, n, removed))) => eprintln!(
                     "[backup] {} files -> {} (pruned {})",
                     n,
@@ -181,11 +180,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
         for ts in ["20260101-000000", "20260102-000000", "20260103-000000"] {
-            std::fs::write(
-                d.join(format!("lmnotes-default-{ts}.zip")),
-                b"z",
-            )
-            .unwrap();
+            std::fs::write(d.join(format!("lmnotes-default-{ts}.zip")), b"z").unwrap();
         }
         // 不相关文件不动
         std::fs::write(d.join("other.txt"), b"x").unwrap();
@@ -221,7 +216,7 @@ mod tests {
         let n = zip_vault_to(s, &dest, None).unwrap();
         assert_eq!(n, 1);
         let f = std::fs::File::open(&dest).unwrap();
-        let mut z = zip::ZipArchive::new(f).unwrap();
+        let z = zip::ZipArchive::new(f).unwrap();
         assert_eq!(z.len(), 1, "只应有 1 个文件（.lmnotes 排除）");
         let mut names = z.file_names().collect::<Vec<_>>();
         names.sort();

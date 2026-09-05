@@ -18,9 +18,6 @@ use lmnotes_core::llm::{ChatMessage, ChatRequest, ChatRole};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
 use std::path::{Path, PathBuf};
-
-/// Windows 反斜杠（避免源码里写字面量转义）。
-const BS: char = '\u{005C}';
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -138,7 +135,10 @@ pub async fn search_hybrid(
             .await
             .ok()
             .and_then(|text| {
-                let body = text.split_once("\n---\n\n").map(|(_, b)| b).unwrap_or(&text);
+                let body = text
+                    .split_once("\n---\n\n")
+                    .map(|(_, b)| b)
+                    .unwrap_or(&text);
                 let s = lmnotes_core::search::make_snippet(body, &query, 160);
                 (!s.is_empty()).then_some(s)
             });
@@ -150,7 +150,10 @@ pub async fn search_hybrid(
             sources: sources.to_string(),
         });
     }
-    Ok(HybridSearchResponse { hits: out, semantic })
+    Ok(HybridSearchResponse {
+        hits: out,
+        semantic,
+    })
 }
 
 /// 双链补全候选（FR-CAP-03）：title/alias/path 子串匹配，title 命中优先。
