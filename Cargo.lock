@@ -2711,7 +2711,7 @@ checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
 name = "lmnotes-cli"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2721,7 +2721,7 @@ dependencies = [
 
 [[package]]
 name = "lmnotes-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2748,7 +2748,7 @@ dependencies = [
 
 [[package]]
 name = "lmnotes-desktop"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "calamine",
@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "lmnotes-mcp"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "axum",
  "futures-util",
