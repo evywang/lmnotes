@@ -99,6 +99,12 @@ jobs:
           # linuxdeploy 第二个已知坑：strip 阶段权限错误同样报
           # "failed to run linuxdeploy"，NO_STRIP 跳过 strip。
           NO_STRIP: "true"
+          # 真凶（--verbose 实测）：linuxdeploy 扫描 AppDir 内 sidecar ELF 时
+          # 按 ldd 解析动态依赖，Ubuntu 预编译 whisper 链 libwhisper.so.1/
+          # libggml*.so（伴生库在 binaries/）——系统目录找不到即报
+          # "Could not find dependency"。LD_LIBRARY_PATH 指向 binaries/ 让
+          # 解析成功并把伴生库正常部署进 AppImage。
+          LD_LIBRARY_PATH: ${{ github.workspace }}/apps/desktop/src-tauri/binaries
         with:
           projectPath: apps/desktop
           # --verbose：让 tauri bundler 打印 linuxdeploy 的 stdout/stderr——
