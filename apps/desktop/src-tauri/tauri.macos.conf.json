@@ -1,6 +1,5 @@
 {
   "bundle": {
-    "externalBin": ["binaries/whisper", "binaries/ffmpeg"],
-    "resources": { "binaries/*.dylib": "./" }
+    "externalBin": ["binaries/whisper", "binaries/ffmpeg"]
   }
 }
