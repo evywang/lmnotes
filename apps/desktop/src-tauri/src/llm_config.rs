@@ -326,7 +326,9 @@ impl Config {
         self.providers.first().map(|p| p.embed_dim()).unwrap_or(768)
     }
 
-    /// 映射到核心层的 Registry + Routing + GuardConfig。
+    /// 映射到核心层的 Registry + Routing + GuardConfig（测试路径；运行时走
+    /// build_with_sink——带用量记录）。
+    #[cfg(test)]
     pub fn build(&self) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
         self.build_with_probe(&SidecarProbe::real())
     }
@@ -340,6 +342,7 @@ impl Config {
     }
 
     /// 同 build()，但 sidecar/模型探测可注入（单测伪造，不依赖真实文件系统）。
+    #[cfg(test)]
     pub(crate) fn build_with_probe(
         &self,
         probe: &SidecarProbe,
@@ -353,7 +356,9 @@ impl Config {
         probe: &SidecarProbe,
         sink: Option<lmnotes_core::llm::usage::UsageSink>,
     ) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
-        use lmnotes_core::llm::usage::{RecordingChat, RecordingEmbed, RecordingTranscribe, RecordingVision};
+        use lmnotes_core::llm::usage::{
+            RecordingChat, RecordingEmbed, RecordingTranscribe, RecordingVision,
+        };
         use lmnotes_core::llm::{ChatCap, EmbedCap, VisionCap};
         use std::sync::Arc;
 
@@ -453,7 +458,9 @@ impl Config {
             {
                 let whisper = std::sync::Arc::new(WhisperProvider::new(id, base_url, api_key));
                 match &sink {
-                    Some(s) => reg.register_transcribe_arc(RecordingTranscribe::arc(whisper, s.clone())),
+                    Some(s) => {
+                        reg.register_transcribe_arc(RecordingTranscribe::arc(whisper, s.clone()))
+                    }
                     None => reg.register_transcribe_arc(whisper),
                 }
             }

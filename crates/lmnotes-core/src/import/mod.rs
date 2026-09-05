@@ -194,7 +194,10 @@ pub fn map_frontmatter(raw: &str, file_stem: &str, id: &str, now: &str) -> Strin
     // 未知键原样保留（OKF §9 消费者须容忍；保持用户数据不丢）
     for (k, v) in src {
         let key_str = k.as_str().unwrap_or("");
-        if !matches!(key_str, "type" | "id" | "title" | "tags" | "aliases" | "created") {
+        if !matches!(
+            key_str,
+            "type" | "id" | "title" | "tags" | "aliases" | "created"
+        ) {
             out.insert(k, v);
         }
     }
@@ -257,11 +260,7 @@ pub fn plan_import(
     let mut dest_of_rel: HashMap<String, String> = HashMap::new();
     let mut used_dests: std::collections::HashSet<String> = Default::default();
     for f in &md_files {
-        let segments: Vec<String> = f
-            .rel
-            .split('/')
-            .map(sanitize_segment)
-            .collect();
+        let segments: Vec<String> = f.rel.split('/').map(sanitize_segment).collect();
         let mut dest = format!("{}/{}", opts.dest_root, segments.join("/"));
         if !dest.ends_with(".md") {
             dest.push_str(".md");
@@ -288,8 +287,15 @@ pub fn plan_import(
     for f in &md_files {
         let dest = dest_of_rel[&f.rel].clone();
         by_exact.insert(f.rel.clone(), dest.clone());
-        by_exact.entry(f.rel.trim_end_matches(".md").to_string()).or_insert(dest.clone());
-        record_unique(&mut by_basename, &mut ambiguous, &file_stem_of(&f.rel), dest.clone());
+        by_exact
+            .entry(f.rel.trim_end_matches(".md").to_string())
+            .or_insert(dest.clone());
+        record_unique(
+            &mut by_basename,
+            &mut ambiguous,
+            &file_stem_of(&f.rel),
+            dest.clone(),
+        );
         if let Some(title) = extract_title(f) {
             record_unique(&mut by_title, &mut ambiguous, &title, dest);
         }
@@ -305,7 +311,12 @@ pub fn plan_import(
             .next()
             .unwrap_or(&a.src_rel)
             .to_string();
-        record_unique(&mut asset_by_basename, &mut asset_ambiguous, &base, a.dest.clone());
+        record_unique(
+            &mut asset_by_basename,
+            &mut asset_ambiguous,
+            &base,
+            a.dest.clone(),
+        );
     }
 
     let resolve = |target: &str| -> Option<ResolveOut> {
@@ -334,7 +345,9 @@ pub fn plan_import(
     for f in md_files {
         let stem = file_stem_of(&f.rel);
         let id = crate::id::new_note_id(chrono::Utc::now().naive_utc());
-        let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
+        let now = chrono::Utc::now()
+            .format("%Y-%m-%dT%H:%M:%S+00:00")
+            .to_string();
         let mapped = map_frontmatter(&f.text, &stem, &id, &now);
         // frontmatter 不含 wikilink，只重写 body 部分：按第二个 --- 拆分
         let (fm, body) = split_planned(&mapped);
@@ -343,7 +356,8 @@ pub fn plan_import(
         // 未解析目标收集 warning（去重）
         for m in body_wikilink_targets(&body) {
             if resolve(&m).is_none() && warned.insert(m.clone()) {
-                plan.warnings.push(format!("未解析链接目标：[[{m}]]（保留原文）"));
+                plan.warnings
+                    .push(format!("未解析链接目标：[[{m}]]（保留原文）"));
             }
         }
         per_file_stats.resolved += st.resolved;
@@ -466,7 +480,13 @@ mod tests {
             out,
             "见 [Note](<notes/import/note.md>) 与 [别名](<notes/import/note.md>)，还有 [Deep Thought](<notes/import/ideas/Deep Thought.md>)。"
         );
-        assert_eq!(stats, WikiStats { resolved: 3, unresolved: 0 });
+        assert_eq!(
+            stats,
+            WikiStats {
+                resolved: 3,
+                unresolved: 0
+            }
+        );
     }
 
     #[test]
@@ -497,7 +517,13 @@ mod tests {
             out,
             "嵌入 ![](/assets/img/ab/pic.png)，小节 [Note](<notes/import/note.md>)，笔记嵌入 [Note](<notes/import/note.md>)。"
         );
-        assert_eq!(stats, WikiStats { resolved: 3, unresolved: 0 });
+        assert_eq!(
+            stats,
+            WikiStats {
+                resolved: 3,
+                unresolved: 0
+            }
+        );
     }
 
     // ── map_frontmatter ────────────────────────────────────────────────────
@@ -510,7 +536,10 @@ mod tests {
         assert!(out.contains("id: nt_x\n"));
         assert!(out.contains("title: 我的笔记\n"));
         assert!(out.contains("created: 2026-09-05T10:00:00+08:00\n"));
-        assert!(out.ends_with("\n正文") || out.ends_with("---\n\n正文"), "body 保留：{out}");
+        assert!(
+            out.ends_with("\n正文") || out.ends_with("---\n\n正文"),
+            "body 保留：{out}"
+        );
     }
 
     #[test]
@@ -522,14 +551,20 @@ mod tests {
         let fm = fm.expect("输出应含可解析 frontmatter");
         let list = |key: &str| -> Vec<String> {
             fm.get(key)
-                .and_then(|v| v.as_sequence().map(|s| {
-                    s.iter()
-                        .filter_map(|i| i.as_str().map(|x| x.to_string()))
-                        .collect()
-                }))
+                .and_then(|v| {
+                    v.as_sequence().map(|s| {
+                        s.iter()
+                            .filter_map(|i| i.as_str().map(|x| x.to_string()))
+                            .collect()
+                    })
+                })
                 .unwrap_or_default()
         };
-        assert_eq!(list("tags"), vec!["a".to_string(), "b".to_string()], "{out}");
+        assert_eq!(
+            list("tags"),
+            vec!["a".to_string(), "b".to_string()],
+            "{out}"
+        );
         assert_eq!(list("aliases"), vec!["单别名".to_string()], "{out}");
     }
 
@@ -566,21 +601,53 @@ mod tests {
             },
         );
         assert_eq!(plan.notes.len(), 2);
-        let a = plan.notes.iter().find(|n| n.dest.ends_with("a.md")).unwrap();
+        let a = plan
+            .notes
+            .iter()
+            .find(|n| n.dest.ends_with("a.md"))
+            .unwrap();
         assert_eq!(a.dest, "notes/import-20260905/a.md");
-        assert!(a.content.contains("[b](<notes/import-20260905/sub/b.md>)"), "按 basename 解析：{}", a.content);
-        assert!(a.content.contains("![](/assets/img/ab/hash.png)"), "资源嵌入：{}", a.content);
-        let b = plan.notes.iter().find(|n| n.dest.ends_with("b.md")).unwrap();
-        assert!(b.content.contains("[Alpha](<notes/import-20260905/a.md>)"), "按 title 解析：{}", b.content);
-        assert_eq!(plan.stats, WikiStats { resolved: 3, unresolved: 0 });
+        assert!(
+            a.content.contains("[b](<notes/import-20260905/sub/b.md>)"),
+            "按 basename 解析：{}",
+            a.content
+        );
+        assert!(
+            a.content.contains("![](/assets/img/ab/hash.png)"),
+            "资源嵌入：{}",
+            a.content
+        );
+        let b = plan
+            .notes
+            .iter()
+            .find(|n| n.dest.ends_with("b.md"))
+            .unwrap();
+        assert!(
+            b.content.contains("[Alpha](<notes/import-20260905/a.md>)"),
+            "按 title 解析：{}",
+            b.content
+        );
+        assert_eq!(
+            plan.stats,
+            WikiStats {
+                resolved: 3,
+                unresolved: 0
+            }
+        );
     }
 
     #[test]
     fn plan_import_sanitizes_and_dedups_collisions() {
         let plan = plan_import(
             vec![
-                SourceMd { rel: "a:b.md".into(), text: "x".into() }, // Windows 非法字符 → 清洗
-                SourceMd { rel: "a_b.md".into(), text: "y".into() }, // 清洗后同名 → -2
+                SourceMd {
+                    rel: "a:b.md".into(),
+                    text: "x".into(),
+                }, // Windows 非法字符 → 清洗
+                SourceMd {
+                    rel: "a_b.md".into(),
+                    text: "y".into(),
+                }, // 清洗后同名 → -2
             ],
             vec![],
             &ImportOptions::default(),
@@ -593,7 +660,10 @@ mod tests {
     #[test]
     fn plan_import_unresolved_links_warn() {
         let plan = plan_import(
-            vec![SourceMd { rel: "a.md".into(), text: "[[ghost]]".into() }],
+            vec![SourceMd {
+                rel: "a.md".into(),
+                text: "[[ghost]]".into(),
+            }],
             vec![],
             &ImportOptions::default(),
         );

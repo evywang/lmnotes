@@ -15,7 +15,7 @@ use futures_util::{Stream, StreamExt};
 
 use super::provider::{
     AudioInput, Capabilities, ChatCap, ChatRequest, EmbedCap, ImageInput, LlmProvider,
-    ProviderKind, Transcript, TranscribeCap, VisionCap,
+    ProviderKind, TranscribeCap, Transcript, VisionCap,
 };
 
 /// 一次成功的 LLM 调用。
@@ -159,9 +159,7 @@ impl<P: EmbedCap + 'static> EmbedCap for RecordingEmbed<P> {
             provider: self.inner.id().to_string(),
             kind: "embed",
             local: self.inner.kind() == ProviderKind::Local,
-            tokens_est: est_tokens(
-                &texts.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-            ),
+            tokens_est: est_tokens(&texts.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
         });
         Ok(out)
     }
@@ -218,7 +216,12 @@ delegate_base!(RecordingVision<P>, VisionCap);
 
 #[async_trait]
 impl<P: VisionCap + 'static> VisionCap for RecordingVision<P> {
-    async fn describe(&self, image: ImageInput, model: &str, prompt: Option<&str>) -> Result<String> {
+    async fn describe(
+        &self,
+        image: ImageInput,
+        model: &str,
+        prompt: Option<&str>,
+    ) -> Result<String> {
         let out = self.inner.describe(image, model, prompt).await?;
         (self.sink)(UsageEvent {
             provider: self.inner.id().to_string(),

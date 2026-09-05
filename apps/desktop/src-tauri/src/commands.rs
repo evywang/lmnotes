@@ -443,7 +443,12 @@ pub async fn generate_review(
     let sources: Vec<(String, String)> = rows
         .iter()
         .take(30)
-        .map(|r| (r.title.clone().unwrap_or_else(|| r.path.clone()), r.path.clone()))
+        .map(|r| {
+            (
+                r.title.clone().unwrap_or_else(|| r.path.clone()),
+                r.path.clone(),
+            )
+        })
         .collect();
     let rel = if days == 1 {
         format!("notes/reviews/review-{today}.md")
@@ -451,7 +456,9 @@ pub async fn generate_review(
         format!("notes/reviews/review-week-{today}.md")
     };
     let id = lmnotes_core::id::new_note_id(chrono::Utc::now().naive_utc());
-    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
+    let ts = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S+00:00")
+        .to_string();
     let title = format!("{period}回顾 {today}");
     let content = build_review_content(&answer, &sources, &title, &id, &ts);
     let full = root.join(&rel);
@@ -500,7 +507,13 @@ pub async fn import_vault(
     let mut md_files = Vec::new();
     let mut asset_files = Vec::new();
     let mut warnings = Vec::new();
-    scan_source_dir(&src_root, "", &mut md_files, &mut asset_files, &mut warnings)?;
+    scan_source_dir(
+        &src_root,
+        "",
+        &mut md_files,
+        &mut asset_files,
+        &mut warnings,
+    )?;
     if md_files.is_empty() && asset_files.is_empty() {
         return Err("目录中没有可导入的 Markdown 或资源文件".into());
     }
@@ -3069,7 +3082,11 @@ mod tests {
         let root = dir.path();
         std::fs::create_dir_all(root.join("ideas")).unwrap();
         std::fs::create_dir_all(root.join(".obsidian")).unwrap();
-        std::fs::write(root.join("ideas/note one.md"), "---\ntitle: A\n---\n\n[[b]]").unwrap();
+        std::fs::write(
+            root.join("ideas/note one.md"),
+            "---\ntitle: A\n---\n\n[[b]]",
+        )
+        .unwrap();
         std::fs::write(root.join("ideas/pic.png"), b"pngbytes").unwrap();
         std::fs::write(root.join(".obsidian/app.json"), b"{}").unwrap();
         std::fs::write(root.join("Thumbs.db"), b"x").unwrap();
@@ -3103,7 +3120,8 @@ mod tests {
     #[test]
     fn review_digest_and_content_format() {
         // v0.8 FR-LLM-07：digest 聚合条目；产物含 review 标签 + 来源 OKF 链接。
-        let digest = build_review_digest(&[("A".into(), " 内容 ".into()), ("B".into(), "x".into())]);
+        let digest =
+            build_review_digest(&[("A".into(), " 内容 ".into()), ("B".into(), "x".into())]);
         assert!(digest.contains("### A\n内容\n\n### B\nx"), "{digest}");
 
         let content = build_review_content(
