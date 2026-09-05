@@ -107,9 +107,6 @@ jobs:
           LD_LIBRARY_PATH: ${{ github.workspace }}/apps/desktop/src-tauri/binaries
         with:
           projectPath: apps/desktop
-          # --verbose：让 tauri bundler 打印 linuxdeploy 的 stdout/stderr——
-          # "failed to run linuxdeploy" 的真实原因默认被吞（排查期保留）
-          args: --verbose
           tagName: ${{ github.ref_name }}
           releaseName: "LMNotes ${{ github.ref_name }}"
           releaseBody: "Bilingual release notes: docs/release-notes/ in the repository. Highlights in the tag announcement."
