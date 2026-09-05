@@ -234,4 +234,9 @@ export const zh: Record<MessageKey, string> = {
   "timeline.empty": "暂无笔记",
   "tags.section": "标签",
   "tags.empty": "暂无标签",
+
+  // ── 快速捕获浮窗（FR-CAP-01，v0.7）───────────────────────────────────
+  "quickCapture.placeholder": "随手记一笔…（Ctrl+Enter 保存）",
+  "quickCapture.saved": "已存入今日笔记 ✓",
+  "quickCapture.hint": "Ctrl+Enter 保存 · Esc 隐藏",
 };

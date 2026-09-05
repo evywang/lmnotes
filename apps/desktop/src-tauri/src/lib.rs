@@ -37,6 +37,36 @@ fn build_registry_from_config() -> (Registry, Routing, GuardConfig) {
     cfg.build()
 }
 
+/// 切换快速捕获浮窗（FR-CAP-01，v0.7）：存在则 show/hide 切换，
+/// 不存在则创建（同一 dist 的 `#quick-capture` 路由，main.tsx 分流渲染精简 UI）。
+fn toggle_quick_capture(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("quick-capture") {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    } else {
+        let built = tauri::WebviewWindowBuilder::new(
+            app,
+            "quick-capture",
+            tauri::WebviewUrl::App("index.html#quick-capture".into()),
+        )
+        .title("LMNotes")
+        .inner_size(460.0, 200.0)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .build();
+        if let Err(e) = built {
+            eprintln!("[hotkey] create quick-capture window failed: {e}");
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let dir = vault_dir();
@@ -244,6 +274,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        // 全局快捷键（FR-CAP-01，v0.7）：CmdOrCtrl+Shift+L 切换快速捕获浮窗。
+        // 注册在 setup 内（Rust 侧 GlobalShortcutExt，不经过 JS 权限）。
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        toggle_quick_capture(app);
+                    }
+                })
+                .build(),
+        )
         .manage(indexer)
         .manage(engine)
         .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
@@ -259,6 +300,14 @@ pub fn run() {
             let worker_deps = worker_deps;
             // 媒体任务后台 worker（v0.5 FR-MEDIA-04）：running→pending 兜底 + 常驻循环
             media_tasks::spawn_worker(app.handle().clone(), worker_deps);
+            // 全局快捷键注册（v0.7 FR-CAP-01）。快捷键常量集中在此，改绑只需改这一处。
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            const QUICK_CAPTURE_HOTKEY: &str = "CmdOrCtrl+Shift+L";
+            if let Err(e) = app.global_shortcut().register(QUICK_CAPTURE_HOTKEY) {
+                eprintln!(
+                    "[hotkey] register {QUICK_CAPTURE_HOTKEY} failed: {e} (被占用？快速捕获浮窗仍可从应用内使用)"
+                );
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

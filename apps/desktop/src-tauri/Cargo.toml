@@ -16,6 +16,7 @@ lmnotes-core = { path = "../../../crates/lmnotes-core" }
 lmnotes-mcp = { path = "../../../crates/lmnotes-mcp" }
 tauri = { workspace = true, features = [] }
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-shell = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

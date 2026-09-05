@@ -1,5 +1,6 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
@@ -82,7 +83,14 @@ export function App() {
       setPaletteOpen(true);
     }
   };
-  onMount(() => initMediaTaskFeed());
+  onMount(() => {
+    initMediaTaskFeed();
+    // 全局快捷键浮窗（FR-CAP-01）保存成功后刷新文件树与搜索结果
+    void listen("quick-note-saved", () => {
+      setTreeRefresh((n) => n + 1);
+      runSearch("");
+    });
+  });
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 

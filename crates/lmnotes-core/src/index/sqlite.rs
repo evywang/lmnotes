@@ -2,8 +2,7 @@
 
 use super::schema::{
     create_vec_sql, ConceptRow, EdgeRow, MediaTask, ALTER_CONCEPTS_ALIASES, ALTER_CONCEPTS_TAGS,
-    CREATE_CHAT_HISTORY,
-    CREATE_CONCEPTS, CREATE_EDGES, CREATE_MEDIA_TASKS, CREATE_SUGGESTIONS,
+    CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES, CREATE_MEDIA_TASKS, CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -856,7 +855,8 @@ mod tests {
         assert!(idx.get_concept("nt_c").unwrap().unwrap().tags.is_empty());
 
         let conn = idx.conn.lock().unwrap();
-        conn.execute("UPDATE concepts SET tags = 'not-json'", []).unwrap();
+        conn.execute("UPDATE concepts SET tags = 'not-json'", [])
+            .unwrap();
         drop(conn);
         assert!(idx.tag_counts().unwrap().is_empty());
     }

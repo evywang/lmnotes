@@ -235,6 +235,11 @@ export const en = {
   "timeline.empty": "No notes yet",
   "tags.section": "Tags",
   "tags.empty": "No tags yet",
+
+  // ── Quick capture mini window (FR-CAP-01, v0.7) ───────────────────────
+  "quickCapture.placeholder": "Capture a thought… (Ctrl+Enter to save)",
+  "quickCapture.saved": "Saved to today's note ✓",
+  "quickCapture.hint": "Ctrl+Enter save · Esc hide",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

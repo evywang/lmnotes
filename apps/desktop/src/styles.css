@@ -1560,3 +1560,53 @@ body {
   opacity: 0.55;
   font-size: 0.68rem;
 }
+
+/* ── 快速捕获浮窗（FR-CAP-01，v0.7）────────────────────────────────── */
+.quick-capture {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg, #fff);
+  color: inherit;
+}
+.quick-capture-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.6rem 0.35rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border, #ccc);
+  opacity: 0.85;
+  cursor: default;
+  user-select: none;
+}
+.quick-capture-input {
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 0.8rem 0.9rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background: transparent;
+  color: inherit;
+}
+.quick-capture-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0.9rem 0.5rem;
+  border-top: 1px solid var(--border, #ccc);
+}
+.quick-capture-saved {
+  color: #2a9d4a;
+  font-size: 0.78rem;
+}
+.quick-capture-hint {
+  font-size: 0.72rem;
+  opacity: 0.5;
+}
