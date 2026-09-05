@@ -92,6 +92,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # AppImage 工具（linuxdeploy）免 FUSE 运行——libfuse2 已装仍失败的
+          # 兜底（v0.7.0 实测：deb/rpm 成功、仅 AppImage 挂 linuxdeploy）。
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}

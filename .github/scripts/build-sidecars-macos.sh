@@ -22,8 +22,10 @@ cd "$WORK_DIR"
 git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git
 cd whisper.cpp
 cmake -B build -DCMAKE_BUILD_TYPE=Release \
-  -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF \
+  -DWHISPER_BUILD_TESTS=OFF \
   -DWHISPER_BUILD_SERVER=OFF >/dev/null
+# 注：不能关 WHISPER_BUILD_EXAMPLES——whisper-cli 目标位于 examples/，
+# 关掉后 make --target whisper-cli 报 No rule to make target（v0.7.0 实测）。
 cmake --build build --config Release -j"$(sysctl -n hw.ncpu)" --target whisper-cli >/dev/null
 CLI="$(find build -type f -name whisper-cli | head -1)"
 [[ -n "$CLI" ]] || { echo "ERROR: whisper-cli not built" >&2; exit 1; }
