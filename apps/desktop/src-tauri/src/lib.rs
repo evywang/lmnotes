@@ -349,6 +349,7 @@ pub fn run() {
             commands::list_timeline,
             commands::list_tags,
             commands::list_notes_with_tag,
+            commands::import_vault,
             commands::import_note,
             commands::import_document,
             commands::list_tree,

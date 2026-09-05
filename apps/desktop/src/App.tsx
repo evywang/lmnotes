@@ -85,11 +85,14 @@ export function App() {
   };
   onMount(() => {
     initMediaTaskFeed();
-    // 全局快捷键浮窗（FR-CAP-01）保存成功后刷新文件树与搜索结果
-    void listen("quick-note-saved", () => {
+    // 全局快捷键浮窗（FR-CAP-01）保存成功 / 库导入（FR-STORE-06）完成后
+    // 刷新文件树与搜索结果
+    const refresh = () => {
       setTreeRefresh((n) => n + 1);
       runSearch("");
-    });
+    };
+    void listen("quick-note-saved", refresh);
+    void listen("vault-changed", refresh);
   });
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));

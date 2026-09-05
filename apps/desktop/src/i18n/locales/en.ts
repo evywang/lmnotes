@@ -240,6 +240,17 @@ export const en = {
   "quickCapture.placeholder": "Capture a thought… (Ctrl+Enter to save)",
   "quickCapture.saved": "Saved to today's note ✓",
   "quickCapture.hint": "Ctrl+Enter save · Esc hide",
+
+  // ── Vault import (FR-STORE-06, v0.8) ─────────────────────────────────
+  "import.title": "📥 Import external vault",
+  "import.hint": "Import from an Obsidian/Foam/plain-Markdown folder: wikilinks become OKF links, images/audio/video are archived with dedup. Preview first, then confirm.",
+  "import.pickBtn": "Choose folder…",
+  "import.pickDir": "Choose the folder to import",
+  "import.confirm":
+    "About to import {n} note(s) and {a} asset(s).\nLinks: {r} resolved, {u} unresolved (kept verbatim).\n\nProceed?",
+  "import.warnPrefix": "Warnings:",
+  "import.running": "Importing…",
+  "import.done": "Imported {n} note(s) and {a} asset(s) into {d}.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

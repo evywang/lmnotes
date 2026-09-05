@@ -270,6 +270,174 @@ pub fn list_notes_with_tag(
     Ok(rows.into_iter().map(TimelineEntry::from).collect())
 }
 
+// ============ 库导入（FR-STORE-06，v0.8）============
+
+/// 资源扩展名 → assets kind；None = 不识别（跳过并警告）。
+fn asset_kind_of(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" => Some("img"),
+        "mp3" | "wav" | "m4a" | "ogg" | "flac" | "aac" | "opus" => Some("audio"),
+        "mp4" | "webm" | "mov" | "mkv" | "avi" => Some("video"),
+        _ => None,
+    }
+}
+
+/// 递归扫描源目录：md → 文本清单，识别的扩展 → 字节清单，其余跳过并警告。
+/// 排除 `.obsidian` / `.git` / `.trash` / `node_modules` 与系统杂项文件。
+fn scan_source_dir(
+    dir: &Path,
+    prefix: &str,
+    md_out: &mut Vec<(String, String)>,
+    asset_out: &mut Vec<(String, Vec<u8>, String)>,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            if matches!(
+                name.as_str(),
+                ".obsidian" | ".git" | ".trash" | "node_modules"
+            ) {
+                continue;
+            }
+            scan_source_dir(&path, &rel, md_out, asset_out, warnings)?;
+        } else if matches!(name.as_str(), ".DS_Store" | "desktop.ini" | "Thumbs.db") {
+            // 系统杂项静默跳过
+        } else {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if matches!(ext.as_str(), "md" | "markdown") {
+                let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
+                md_out.push((rel, text));
+            } else if let Some(kind) = asset_kind_of(&ext) {
+                let bytes = std::fs::read(&path).map_err(|e| format!("{rel}: {e}"))?;
+                let _ = kind;
+                asset_out.push((rel, bytes, ext));
+            } else {
+                warnings.push(format!("跳过不支持的文件：{rel}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 导入报告（dry-run 与执行共用；executed 区分）。
+#[derive(serde::Serialize)]
+pub struct ImportReport {
+    pub notes: usize,
+    pub assets: usize,
+    pub links_resolved: usize,
+    pub links_unresolved: usize,
+    pub warnings: Vec<String>,
+    pub executed: bool,
+    /// 笔记落位根（如 notes/import-20260905），供前端打开/提示。
+    pub dest_root: String,
+}
+
+/// 从 Obsidian/Foam/纯 md 目录导入（FR-STORE-06）。
+/// dry_run=true 只规划不落盘（前端先展示报告，再确认执行）。
+/// 内存内两阶段：plan_import 完成全部转换后统一写。
+#[tauri::command]
+pub async fn import_vault(
+    src_dir: String,
+    dry_run: bool,
+    indexer: State<'_, Arc<Indexer>>,
+) -> Result<ImportReport, String> {
+    use lmnotes_core::import::{plan_import, AssetDest, ImportOptions, SourceMd};
+
+    let src_root = PathBuf::from(&src_dir);
+    if !src_root.is_dir() {
+        return Err(format!("不是目录：{src_dir}"));
+    }
+
+    let mut md_files = Vec::new();
+    let mut asset_files = Vec::new();
+    let mut warnings = Vec::new();
+    scan_source_dir(&src_root, "", &mut md_files, &mut asset_files, &mut warnings)?;
+    if md_files.is_empty() && asset_files.is_empty() {
+        return Err("目录中没有可导入的 Markdown 或资源文件".into());
+    }
+
+    // 资源路径规划（dry-run 与执行一致——链接重写依赖这些路径）
+    let asset_dests: Vec<AssetDest> = asset_files
+        .iter()
+        .map(|(rel, bytes, ext)| {
+            let kind = asset_kind_of(ext).unwrap_or("img");
+            let (dest, _) = archive_plan(bytes, ext, kind);
+            AssetDest {
+                src_rel: rel.clone(),
+                dest,
+            }
+        })
+        .collect();
+
+    let date = chrono::Utc::now().format("%Y%m%d").to_string();
+    let dest_root = format!("notes/import-{date}");
+    let plan = plan_import(
+        md_files
+            .into_iter()
+            .map(|(rel, text)| SourceMd { rel, text })
+            .collect(),
+        asset_dests,
+        &ImportOptions {
+            dest_root: dest_root.clone(),
+        },
+    );
+    let mut all_warnings = warnings;
+    all_warnings.extend(plan.warnings);
+
+    if dry_run {
+        return Ok(ImportReport {
+            notes: plan.notes.len(),
+            assets: asset_files.len(),
+            links_resolved: plan.stats.resolved,
+            links_unresolved: plan.stats.unresolved,
+            warnings: all_warnings,
+            executed: false,
+            dest_root,
+        });
+    }
+
+    // 执行：资源归档（去重幂等）→ 笔记落盘 → 增量重扫入索引
+    for (_, bytes, ext) in &asset_files {
+        let kind = asset_kind_of(ext).unwrap_or("img");
+        archive_binary(bytes, ext, kind).await?;
+    }
+    let root = vault_root();
+    for note in &plan.notes {
+        let full = root.join(&note.dest);
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, &note.content)
+            .await
+            .map_err(|e| format!("{}: {e}", note.dest))?;
+    }
+    let backend = lmnotes_core::backend::fs::FsBackend::new(root.clone());
+    let _ = lmnotes_core::indexer::walk_and_index(&indexer, &backend, &root).await;
+
+    Ok(ImportReport {
+        notes: plan.notes.len(),
+        assets: asset_files.len(),
+        links_resolved: plan.stats.resolved,
+        links_unresolved: plan.stats.unresolved,
+        warnings: all_warnings,
+        executed: true,
+        dest_root,
+    })
+}
+
 /// 插入图片：按 SHA-256 哈希存 assets/img/<前2位>/<hash>.<ext>（去重）。
 /// 返回 bundle-relative 路径（带前导 /），供前端插入 markdown 图片链接。
 #[tauri::command]
@@ -281,13 +449,21 @@ pub async fn insert_image(data: Vec<u8>, ext: String) -> Result<String, String> 
 /// 二进制归档：按 SHA-256 哈希存 assets/<kind>/<前2位>/<hash>.<ext>（去重）。
 /// kind ∈ {img, audio}。返回 (bundle-relative 路径带前导 /, hex 哈希)。
 /// insert_image（图片）与 insert_audio / create_voice_note（音频）共用。
-async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, String), String> {
+/// 归档路径规划（纯计算，不落盘）：sha256 → `assets/<kind>/<前2位>/<hash>.<ext>`。
+/// v0.8 导入 dry-run 需要与执行一致的资源路径（链接重写依赖），抽出与
+/// archive_binary 共用。
+fn archive_plan(data: &[u8], ext: &str, kind: &str) -> (String, String) {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(data);
     let hash = hex::encode(h.finalize());
     let prefix = &hash[..2];
     let rel = format!("assets/{kind}/{prefix}/{hash}.{ext}");
+    (format!("/{rel}"), hash)
+}
+
+async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, String), String> {
+    let (rel, hash) = archive_plan(data, ext, kind);
     let full = vault_root().join(&rel);
     if !full.exists() {
         if let Some(p) = full.parent() {
@@ -299,7 +475,7 @@ async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, S
             .await
             .map_err(|e| e.to_string())?;
     }
-    Ok((format!("/{rel}"), hash))
+    Ok((rel, hash))
 }
 
 /// 插入音频：存 assets/audio/<前2位>/<hash>.<ext>（去重），返回带前导 / 的相对路径。
@@ -2709,9 +2885,9 @@ async fn send_download_get(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_extract_audio_cmd, builtin_whisper_models, daily_header, daily_note_rel,
-        download_urls, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
-        render_template_placeholders, TimelineEntry,
+        asset_kind_of, build_extract_audio_cmd, builtin_whisper_models, daily_header,
+        daily_note_rel, download_urls, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
+        render_template_placeholders, scan_source_dir, TimelineEntry,
     };
     use chrono::TimeZone;
     use lmnotes_core::index::schema::ConceptRow;
@@ -2744,6 +2920,45 @@ mod tests {
         assert_eq!(e.type_, "daily");
         assert_eq!(e.mtime, 42);
         assert!(e.title.is_none());
+    }
+
+    #[test]
+    fn scan_source_dir_classifies_and_excludes() {
+        // v0.8 FR-STORE-06：md/资源分类入列；.obsidian、.git、系统杂项静默排除；
+        // 不识别扩展告警（不丢信息）。
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("ideas")).unwrap();
+        std::fs::create_dir_all(root.join(".obsidian")).unwrap();
+        std::fs::write(root.join("ideas/note one.md"), "---\ntitle: A\n---\n\n[[b]]").unwrap();
+        std::fs::write(root.join("ideas/pic.png"), b"pngbytes").unwrap();
+        std::fs::write(root.join(".obsidian/app.json"), b"{}").unwrap();
+        std::fs::write(root.join("Thumbs.db"), b"x").unwrap();
+        std::fs::write(root.join("data.pdf"), b"%PDF").unwrap();
+        let mut md = vec![];
+        let mut assets = vec![];
+        let mut warns = vec![];
+        scan_source_dir(root, "", &mut md, &mut assets, &mut warns).unwrap();
+        assert_eq!(md.len(), 1, "{md:?}");
+        assert_eq!(md[0].0, "ideas/note one.md");
+        assert_eq!(assets.len(), 1, "{assets:?}");
+        assert_eq!(assets[0].0, "ideas/pic.png");
+        assert!(warns.iter().any(|w| w.contains("data.pdf")), "{warns:?}");
+        assert!(
+            !warns
+                .iter()
+                .any(|w| w.contains(".obsidian") || w.contains("Thumbs")),
+            "{warns:?}"
+        );
+    }
+
+    #[test]
+    fn asset_kind_mapping_covers_media_families() {
+        assert_eq!(asset_kind_of("png"), Some("img"));
+        assert_eq!(asset_kind_of("svg"), Some("img"));
+        assert_eq!(asset_kind_of("m4a"), Some("audio"));
+        assert_eq!(asset_kind_of("webm"), Some("video"));
+        assert_eq!(asset_kind_of("pdf"), None);
     }
 
     #[test]

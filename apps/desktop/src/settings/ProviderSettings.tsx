@@ -1,8 +1,9 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { t, locale, setLocale } from "../i18n";
 import { LocalSttSetup } from "../voice/LocalSttSetup";
-import { save as saveDialog, message } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog, message, ask } from "@tauri-apps/plugin-dialog";
 import { APP_NAME } from "../components/PromptDialog";
 import { VaultSection } from "./VaultSection";
 
@@ -51,10 +52,70 @@ interface ProviderHealth {
   healthy: boolean;
 }
 
+/** 导入报告（import_vault 命令返回）。 */
+interface ImportReport {
+  notes: number;
+  assets: number;
+  links_resolved: number;
+  links_unresolved: number;
+  warnings: string[];
+  executed: boolean;
+  dest_root: string;
+}
+
 export function ProviderSettings(props: { onClose: () => void }) {
   const [config, setConfig] = createSignal<Config | null>(null);
   const [health, setHealth] = createSignal<ProviderHealth[]>([]);
   const [saving, setSaving] = createSignal(false);
+  const [importing, setImporting] = createSignal(false);
+
+  // 库导入（FR-STORE-06，v0.8）：选目录 → dry-run 报告确认 → 执行 → 刷新主窗口。
+  const doImport = async () => {
+    if (importing()) return;
+    const picked = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("import.pickDir"),
+    });
+    if (!picked || typeof picked !== "string") return;
+    setImporting(true);
+    try {
+      const dry = await invoke<ImportReport>("import_vault", {
+        srcDir: picked,
+        dryRun: true,
+      });
+      const warnLines = dry.warnings.length
+        ? "\n" + t("import.warnPrefix") + "\n" + dry.warnings.slice(0, 5).join("\n")
+        : "";
+      const ok = await ask(
+        t("import.confirm", {
+          n: dry.notes,
+          a: dry.assets,
+          r: dry.links_resolved,
+          u: dry.links_unresolved,
+        }) + warnLines,
+        { title: APP_NAME },
+      );
+      if (!ok) return;
+      const rep = await invoke<ImportReport>("import_vault", {
+        srcDir: picked,
+        dryRun: false,
+      });
+      void message(
+        t("import.done", { n: rep.notes, a: rep.assets, d: rep.dest_root }),
+        { title: APP_NAME },
+      );
+      try {
+        await emit("vault-changed");
+      } catch {
+        /* 主窗口刷新失败不影响导入结果 */
+      }
+    } catch (e) {
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   onMount(async () => {
     try {
@@ -381,6 +442,16 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   </button>
                 </div>
                 <p class="muted small">{t("data.hint")}</p>
+              </div>
+
+              <div class="data-section">
+                <h3>{t("import.title")}</h3>
+                <div class="settings-actions" style={{ "justify-content": "flex-start" }}>
+                  <button class="btn-secondary" onClick={() => void doImport()} disabled={importing()}>
+                    {importing() ? t("import.running") : t("import.pickBtn")}
+                  </button>
+                </div>
+                <p class="muted small">{t("import.hint")}</p>
               </div>
 
               <div class="settings-actions">

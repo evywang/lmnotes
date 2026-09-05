@@ -239,4 +239,15 @@ export const zh: Record<MessageKey, string> = {
   "quickCapture.placeholder": "随手记一笔…（Ctrl+Enter 保存）",
   "quickCapture.saved": "已存入今日笔记 ✓",
   "quickCapture.hint": "Ctrl+Enter 保存 · Esc 隐藏",
+
+  // ── 库导入（FR-STORE-06，v0.8）───────────────────────────────────────
+  "import.title": "📥 导入外部库",
+  "import.hint": "从 Obsidian/Foam/纯 Markdown 目录导入：wikilink 自动转 OKF 链接，图片/音视频归档去重；先预览报告再确认执行。",
+  "import.pickBtn": "选择目录…",
+  "import.pickDir": "选择要导入的库目录",
+  "import.confirm":
+    "将导入 {n} 篇笔记、{a} 个资源。\n链接解析：{r} 成功 / {u} 未解析（未解析的保留原文）。\n\n确认执行？",
+  "import.warnPrefix": "警告：",
+  "import.running": "导入中…",
+  "import.done": "已导入 {n} 篇笔记、{a} 个资源（位于 {d}）。",
 };
