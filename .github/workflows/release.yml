@@ -95,6 +95,9 @@ jobs:
           # AppImage 工具（linuxdeploy）免 FUSE 运行——libfuse2 已装仍失败的
           # 兜底（v0.7.0 实测：deb/rpm 成功、仅 AppImage 挂 linuxdeploy）。
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          # linuxdeploy 第二个已知坑：strip 阶段权限错误同样报
+          # "failed to run linuxdeploy"，NO_STRIP 跳过 strip。
+          NO_STRIP: "true"
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
