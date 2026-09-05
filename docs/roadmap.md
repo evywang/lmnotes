@@ -67,6 +67,27 @@
 | 语音可用性包 | **Windows 打包版语音修复**(sidecar 平台配置改名 `tauri.*.conf.json` 被 Tauri 2 自动加载);模型下载 404 修复 + hf-mirror 镜像回退 + 30s 超时;弹窗内联下载免重启 | M | ✅ |
 | 多 Provider 云端 STT | 设置页增删 OpenAI 兼容 provider,Transcribe Model 自动派生转录路由(主 LLM 无转录端点时可专配 STT provider) | S | ✅ |
 
+### v0.7.0「导航与 MVP 收口」✅ 已实现([实施设计](superpowers/plans/2026-09-04-v0.7.0-navigation-mvp-closure.md))
+
+> **里程碑：本版完成后 PRD §5 全部 MVP 级行 ✅（M0–M4 达成）。**
+
+| 功能 | 实现路径 | 量级 | 状态 |
+|---|---|---|---|
+| **FR-SEARCH-01 命令面板** | Ctrl+K 浮层:命令 + list_note_titles 笔记检索 + 最近打开(localStorage 上限 8);↑↓/Enter/Esc 全键盘 | M | ✅ |
+| **FR-CAP-01 全局快捷键浮窗** | tauri-plugin-global-shortcut(Rust 侧注册,失败降级);置顶无边框小窗 #quick-capture 路由,Ctrl+Enter 存当日日记 | M | ✅ |
+| FR-SEARCH-05 时间线/每日/标签 | concepts.tags 列(老库迁移)+ mtime 倒序按日分组视图 + 标签云过滤 + 今日笔记幂等入口 | M | ✅ |
+| 门禁与实测 | fmt/clippy/187 tests/tsc/build + CDP 实测 10/10 | — | ✅ |
+
+### v0.8.0「迁移与回顾」✅ 已实现([实施设计](superpowers/plans/2026-09-05-v0.8.0-migration-and-review.md))
+
+| 功能 | 实现路径 | 量级 | 状态 |
+|---|---|---|---|
+| **FR-STORE-06 库导入** | core import 纯逻辑(wikilink→OKF 链接五形态/frontmatter 映射/路径去重,9 测试)+ import_vault dry-run 报告→确认执行 + assets SHA-256 去重归档 + 设置页入口 | L | ✅ |
+| **FR-MODEL-05 用量仪表盘** | Recording 包装器单一挂点(流式 chat 部分成功计数,失败不记)+ llm_usage 脱敏表(无内容)+ 设置页按 provider×任务分组表格 | S | ✅ |
+| **FR-LLM-07 每日/每周回顾** | 近 1/7 天笔记聚合(30 篇×200 字)→ Summarize 路由 + ADR-0005 护栏 → notes/reviews/ 产物(来源 OKF 链接表);命令面板动作 | M | ✅ |
+| 热键可配置 | config.capture.hotkey(默认 CmdOrCtrl+Shift+L,旧 config 兼容);设置页输入,重启生效 | S | ✅ |
+| 门禁与实测 | fmt/clippy/204 tests/tsc/build + CDP 冒烟 8/8(含真实 GLM 回顾与用量落库) | — | ✅ |
+
 ---
 
 ## 刻意押后(有真实需求再立项)

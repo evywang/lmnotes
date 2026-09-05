@@ -96,6 +96,6 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: "LMNotes ${{ github.ref_name }}"
-          releaseBody: "LMNotes v0.6 — cancellable media tasks with timeout budgets, voice fixes (Windows sidecar bundling, in-app model download, multi-provider cloud STT). See release notes."
+          releaseBody: "Bilingual release notes: docs/release-notes/ in the repository. Highlights in the tag announcement."
           releaseDraft: true
           prerelease: false

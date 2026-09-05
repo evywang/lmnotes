@@ -258,12 +258,12 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-STORE-03 | 资源文件 SHA-256 去重存储；引用通过相对路径 | MVP |
 | FR-STORE-04 | 文件系统实时监听（vault 目录被外部编辑能感知并重建增量索引） | P1 |
 | FR-STORE-05 | 一键导出 Vault 为 zip / 初始化 git 仓库（✅ v0.5.0 已实现） | P1 |
-| FR-STORE-06 | 从 Obsidian/Foam/纯 Markdown 目录 best-effort 导入（含 wikilink 转换） | P2 |
+| FR-STORE-06 | 从 Obsidian/Foam/纯 Markdown 目录 best-effort 导入（含 wikilink 转换）（✅ v0.8.0 已实现：dry-run 报告 → 确认执行，wikilink→OKF、assets SHA-256 去重） | P2 |
 
 ### 5.2 捕获与编辑（域：CAPTURE）
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-CAP-01 | 全局快捷键唤起"快速捕获"浮窗（桌面端），支持文本/语音 | MVP |
+| FR-CAP-01 | 全局快捷键唤起"快速捕获"浮窗（桌面端），支持文本/语音（✅ v0.7.0 已实现：Ctrl/Cmd+Shift+L 置顶速记小窗；v0.8.0 起热键可配置） | MVP |
 | FR-CAP-02 | 所见即所写 Markdown 编辑器（CommonMark + GFM：表格/任务列表/脚注/数学） | MVP |
 | FR-CAP-03 | 实时双向链接补全：键入 `[](` 时按 title/alias/id 补全为目标 concept 的 OKF 路径链接（✅ v0.3.0 已实现：`[` 触发，title/alias/路径补全） | MVP |
 | FR-CAP-04 | 拖拽 / 粘贴 / 选择文件 添加图片、音频、视频；自动落 `assets/` 并生成对应描述 concept（§3.5）（✅ v0.4.0：图片描述 + 音视频自动转录） | MVP |
@@ -291,18 +291,18 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-LLM-04 | **图谱问答（Chat with Vault）：** 基于向量+图谱 RAG，回答带可点击引用 | MVP |
 | FR-LLM-05 | **就地改写：** 选中正文 → 润色/扩写/翻译/总结为要点，带撤销 | MVP |
 | FR-LLM-06 | **行动项抽取：** 从会议/语音转录抽取 TODO 并可转为任务（✅ v0.3.0 已实现：checklist 追加正文；转独立任务待后续） | P1 |
-| FR-LLM-07 | **每日回顾 / 周报：** 基于时间段内的笔记自动生成 | P2 |
+| FR-LLM-07 | **每日回顾 / 周报：** 基于时间段内的笔记自动生成（✅ v0.8.0 已实现：手动触发生成至 notes/reviews/；定时自动生成留后续） | P2 |
 | FR-LLM-08 | 所有 LLM 调用需用户可见的"是否上云"开关；含敏感关键词的条目默认仅本地模型 | MVP |
 | FR-LLM-09 | 每条 LLM 输出可回滚（保留前序版本于 `.lmnotes/llm/snapshots/`）（✅ v0.3.0 已实现：历史面板浏览/恢复） | P1 |
 
 ### 5.5 搜索与连接（域：SEARCH）
 | ID | 需求 | 优先级 |
 |---|---|---|
-| FR-SEARCH-01 | 全局命令面板（⌘/Ctrl+K）：跳转笔记、执行命令、问答 | MVP |
+| FR-SEARCH-01 | 全局命令面板（⌘/Ctrl+K）：跳转笔记、执行命令、问答（✅ v0.7.0 已实现：命令 + 笔记检索 + 最近打开；问答入口经命令面板直达 Chat） | MVP |
 | FR-SEARCH-02 | 混合搜索：关键词（BM25）+ 向量 + 标签/属性过滤，结果可融合排序 | MVP |
 | FR-SEARCH-03 | 知识图谱可视化（力导向图）：节点=笔记，边=链接；可过滤/聚焦/折叠 | P1 |
 | FR-SEARCH-04 | 反向链接面板（在笔记侧显示谁引用了它） | MVP |
-| FR-SEARCH-05 | 时间线 / 每日笔记 / 标签云等派生视图 | P1 |
+| FR-SEARCH-05 | 时间线 / 每日笔记 / 标签云等派生视图（✅ v0.7.0 已实现：mtime 时间线分组 + 每日笔记幂等入口 + 标签云过滤） | P1 |
 
 ### 5.6 高级感与高效 UX（域：UX）
 | ID | 需求 | 优先级 |
@@ -322,7 +322,7 @@ transcribed_by: whisper-large-v3@local               # LMNotes 扩展
 | FR-MODEL-02 | 按任务分派不同模型：摘要 / 链接建议 / 向量化 / 对话 / 转录 / 视觉 | MVP |
 | FR-MODEL-03 | 连接配置：Base URL / API Key / 模型名 / 上下文窗口 / 速率，可测试连通 | MVP |
 | FR-MODEL-04 | 隐私分级：标记每个 Provider 为 local/cloud；条目级开关控制是否允许发往云端 | MVP |
-| FR-MODEL-05 | 成本与用量仪表盘（本地次数 / 云端 token 估算） | P2 |
+| FR-MODEL-05 | 成本与用量仪表盘（本地次数 / 云端 token 估算）（✅ v0.8.0 已实现：llm_usage 脱敏记录 + 设置页分组表格；token 为估算值） | P2 |
 
 ### 5.8 多平台（域：PLATFORM）—— 见 §8、决策 O3
 | ID | 需求 | 优先级 |
