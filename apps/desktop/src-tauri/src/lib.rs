@@ -9,8 +9,6 @@ use lmnotes_core::backend::fs::FsBackend;
 use lmnotes_core::index::sqlite::SqliteIndex;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::indexer::{walk_and_index, Indexer};
-use lmnotes_core::llm::guard::GuardConfig;
-use lmnotes_core::llm::routing::{Registry, Routing};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::SearchEngine;
 use notify::{RecursiveMode, Watcher};
@@ -30,12 +28,6 @@ struct HoldWatcher(Option<notify::RecommendedWatcher>);
 /// 保活标记：MCP server 在独立 spawn 中运行，此结构仅用于语义上标记其已启用。
 #[allow(dead_code)]
 struct HoldMcp;
-
-/// 构建默认 Registry + Routing（M1b-T10：从 config.json 加载）。
-fn build_registry_from_config() -> (Registry, Routing, GuardConfig) {
-    let cfg = llm_config::Config::load_or_default();
-    cfg.build()
-}
 
 /// 切换快速捕获浮窗（FR-CAP-01，v0.7）：存在则 show/hide 切换，
 /// 不存在则创建（同一 dist 的 `#quick-capture` 路由，main.tsx 分流渲染精简 UI）。
@@ -78,10 +70,26 @@ pub fn run() {
     let fulltext = Arc::new(TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"));
     let indexer = Arc::new(Indexer::new(meta.clone(), fulltext.clone()));
     let engine = Arc::new(SearchEngine::new(meta.clone(), fulltext.clone()));
-    let (registry, routing, guard_cfg) = build_registry_from_config();
+    // LLM 用量记录（v0.8 FR-MODEL-05）：sink 只做 channel send（非阻塞），
+    // 消费任务落 llm_usage 表；provider 注册时统一包裹（见 build_with_sink）。
+    let (usage_tx, mut usage_rx) =
+        tokio::sync::mpsc::unbounded_channel::<lmnotes_core::llm::usage::UsageEvent>();
+    let usage_sink: lmnotes_core::llm::usage::UsageSink = Arc::new(move |e| {
+        let _ = usage_tx.send(e);
+    });
+    let (registry, routing, guard_cfg) =
+        llm_config::Config::load_or_default().build_with_sink(usage_sink);
     let registry = Arc::new(registry);
     let routing = Arc::new(routing);
     let guard_cfg = Arc::new(guard_cfg);
+    let usage_db = meta.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(e) = usage_rx.recv().await {
+            if let Err(err) = usage_db.record_usage(&e.provider, e.kind, e.local, e.tokens_est) {
+                eprintln!("[usage] record failed: {err}");
+            }
+        }
+    });
 
     // 首启探测：检测 Provider 健康，不可用时日志提示（O6c）
     tauri::async_runtime::spawn(async {
@@ -350,6 +358,7 @@ pub fn run() {
             commands::list_tags,
             commands::list_notes_with_tag,
             commands::import_vault,
+            commands::get_usage_summary,
             commands::import_note,
             commands::import_document,
             commands::list_tree,

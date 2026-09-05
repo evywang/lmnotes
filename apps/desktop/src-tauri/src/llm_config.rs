@@ -307,11 +307,62 @@ impl Config {
         self.build_with_probe(&SidecarProbe::real())
     }
 
+    /// 同 build()，但给全部 provider 挂用量记录（v0.8 FR-MODEL-05，运行时路径）。
+    pub fn build_with_sink(
+        &self,
+        sink: lmnotes_core::llm::usage::UsageSink,
+    ) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
+        self.build_with_probe_sink(&SidecarProbe::real(), Some(sink))
+    }
+
     /// 同 build()，但 sidecar/模型探测可注入（单测伪造，不依赖真实文件系统）。
     pub(crate) fn build_with_probe(
         &self,
         probe: &SidecarProbe,
     ) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
+        self.build_with_probe_sink(probe, None)
+    }
+
+    /// build 全路径：探测注入 + 可选用量 sink（None = 不记录，单测/探测用）。
+    pub(crate) fn build_with_probe_sink(
+        &self,
+        probe: &SidecarProbe,
+        sink: Option<lmnotes_core::llm::usage::UsageSink>,
+    ) -> (lmnotes_core::llm::routing::Registry, Routing, GuardConfig) {
+        use lmnotes_core::llm::usage::{RecordingChat, RecordingEmbed, RecordingTranscribe, RecordingVision};
+        use lmnotes_core::llm::{ChatCap, EmbedCap, VisionCap};
+        use std::sync::Arc;
+
+        fn wrap_chat<P: ChatCap + 'static>(
+            reg: &mut lmnotes_core::llm::routing::Registry,
+            arc: Arc<P>,
+            sink: &Option<lmnotes_core::llm::usage::UsageSink>,
+        ) {
+            match sink {
+                Some(s) => reg.register_chat_arc(RecordingChat::arc(arc, s.clone())),
+                None => reg.register_chat_arc(arc),
+            }
+        }
+        fn wrap_embed<P: EmbedCap + 'static>(
+            reg: &mut lmnotes_core::llm::routing::Registry,
+            arc: Arc<P>,
+            sink: &Option<lmnotes_core::llm::usage::UsageSink>,
+        ) {
+            match sink {
+                Some(s) => reg.register_embed_arc(RecordingEmbed::arc(arc, s.clone())),
+                None => reg.register_embed_arc(arc),
+            }
+        }
+        fn wrap_vision<P: VisionCap + 'static>(
+            reg: &mut lmnotes_core::llm::routing::Registry,
+            arc: Arc<P>,
+            sink: &Option<lmnotes_core::llm::usage::UsageSink>,
+        ) {
+            match sink {
+                Some(s) => reg.register_vision_arc(RecordingVision::arc(arc, s.clone())),
+                None => reg.register_vision_arc(arc),
+            }
+        }
         use lmnotes_core::llm::ollama::OllamaProvider;
         use lmnotes_core::llm::openai::OpenAiProvider;
         use lmnotes_core::llm::whisper::WhisperProvider;
@@ -327,10 +378,10 @@ impl Config {
                     ..
                 } => {
                     let ollama = std::sync::Arc::new(OllamaProvider::new(base_url));
-                    reg.register_chat_arc(ollama.clone());
-                    reg.register_embed_arc(ollama.clone());
+                    wrap_chat(&mut reg, ollama.clone(), &sink);
+                    wrap_embed(&mut reg, ollama.clone(), &sink);
                     if vision_model.is_some() {
-                        reg.register_vision_arc(ollama);
+                        wrap_vision(&mut reg, ollama, &sink);
                     }
                 }
                 ProviderConfig::OpenAi {
@@ -341,10 +392,10 @@ impl Config {
                     ..
                 } => {
                     let openai = std::sync::Arc::new(OpenAiProvider::new(id, base_url, api_key));
-                    reg.register_chat_arc(openai.clone());
-                    reg.register_embed_arc(openai.clone());
+                    wrap_chat(&mut reg, openai.clone(), &sink);
+                    wrap_embed(&mut reg, openai.clone(), &sink);
                     if vision_model.is_some() {
-                        reg.register_vision_arc(openai);
+                        wrap_vision(&mut reg, openai, &sink);
                     }
                 }
                 ProviderConfig::WhisperCpp {
@@ -376,8 +427,11 @@ impl Config {
                 ..
             } = p
             {
-                let whisper = WhisperProvider::new(id, base_url, api_key);
-                reg.register_transcribe(whisper);
+                let whisper = std::sync::Arc::new(WhisperProvider::new(id, base_url, api_key));
+                match &sink {
+                    Some(s) => reg.register_transcribe_arc(RecordingTranscribe::arc(whisper, s.clone())),
+                    None => reg.register_transcribe_arc(whisper),
+                }
             }
         }
         // 自动注册 whisper.cpp 作为本地降级 provider（ADR-0007 §决策"开箱可用"）：

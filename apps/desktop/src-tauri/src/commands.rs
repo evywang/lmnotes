@@ -330,6 +330,14 @@ fn scan_source_dir(
     Ok(())
 }
 
+/// LLM 用量汇总（FR-MODEL-05）：设置页仪表盘数据。
+#[tauri::command]
+pub fn get_usage_summary(
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<lmnotes_core::index::sqlite::UsageRow>, String> {
+    sqlite.usage_summary().map_err(|e| e.to_string())
+}
+
 /// 导入报告（dry-run 与执行共用；executed 区分）。
 #[derive(serde::Serialize)]
 pub struct ImportReport {

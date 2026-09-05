@@ -250,4 +250,16 @@ export const zh: Record<MessageKey, string> = {
   "import.warnPrefix": "警告：",
   "import.running": "导入中…",
   "import.done": "已导入 {n} 篇笔记、{a} 个资源（位于 {d}）。",
+
+  // ── LLM 用量（FR-MODEL-05，v0.8）──────────────────────────────────────
+  "usage.title": "📊 LLM 用量",
+  "usage.empty": "尚无 LLM 调用记录。",
+  "usage.colProvider": "Provider",
+  "usage.colKind": "任务",
+  "usage.colScope": "范围",
+  "usage.colCalls": "次数",
+  "usage.colTokens": "Token（估算）",
+  "usage.local": "本地",
+  "usage.cloud": "云端",
+  "usage.hint": "隐私：只记录 provider/任务/本地或云端/估算 token，不记录任何内容。",
 };

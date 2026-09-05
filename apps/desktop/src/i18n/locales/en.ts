@@ -251,6 +251,18 @@ export const en = {
   "import.warnPrefix": "Warnings:",
   "import.running": "Importing…",
   "import.done": "Imported {n} note(s) and {a} asset(s) into {d}.",
+
+  // ── LLM usage (FR-MODEL-05, v0.8) ─────────────────────────────────────
+  "usage.title": "📊 LLM usage",
+  "usage.empty": "No LLM calls recorded yet.",
+  "usage.colProvider": "Provider",
+  "usage.colKind": "Task",
+  "usage.colScope": "Scope",
+  "usage.colCalls": "Calls",
+  "usage.colTokens": "Tokens (est.)",
+  "usage.local": "Local",
+  "usage.cloud": "Cloud",
+  "usage.hint": "Privacy: only provider/task/local-vs-cloud and estimated tokens are recorded — never content.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

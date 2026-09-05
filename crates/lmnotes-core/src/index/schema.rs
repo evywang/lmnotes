@@ -25,6 +25,19 @@ pub const ALTER_CONCEPTS_ALIASES: &str =
 pub const ALTER_CONCEPTS_TAGS: &str =
     "ALTER TABLE concepts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'";
 
+/// LLM 用量表（v0.8 FR-MODEL-05）：只记 provider/kind/本地或云端/估算 token，
+/// 不记任何内容（§7.4 脱敏要求）。
+pub const CREATE_LLM_USAGE: &str = "
+CREATE TABLE IF NOT EXISTS llm_usage (
+    ts      INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    kind    TEXT NOT NULL,
+    local   INTEGER NOT NULL,
+    tokens  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
+";
+
 /// SQLite edges 表：图谱邻接（增量，见 ADR-0003 F5）。
 pub const CREATE_EDGES: &str = "
 CREATE TABLE IF NOT EXISTS edges (

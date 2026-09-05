@@ -52,6 +52,16 @@ interface ProviderHealth {
   healthy: boolean;
 }
 
+/** 用量汇总行（get_usage_summary 命令返回）。 */
+interface UsageRow {
+  provider: string;
+  kind: string;
+  local: boolean;
+  calls: number;
+  tokens: number;
+  last_ts: number;
+}
+
 /** 导入报告（import_vault 命令返回）。 */
 interface ImportReport {
   notes: number;
@@ -68,6 +78,15 @@ export function ProviderSettings(props: { onClose: () => void }) {
   const [health, setHealth] = createSignal<ProviderHealth[]>([]);
   const [saving, setSaving] = createSignal(false);
   const [importing, setImporting] = createSignal(false);
+  const [usage, setUsage] = createSignal<UsageRow[]>([]);
+
+  const refreshUsage = async () => {
+    try {
+      setUsage(await invoke<UsageRow[]>("get_usage_summary"));
+    } catch {
+      setUsage([]);
+    }
+  };
 
   // 库导入（FR-STORE-06，v0.8）：选目录 → dry-run 报告确认 → 执行 → 刷新主窗口。
   const doImport = async () => {
@@ -126,6 +145,7 @@ export function ProviderSettings(props: { onClose: () => void }) {
     } catch (e) {
       console.error("load config", e);
     }
+    void refreshUsage();
   });
 
   const save = async () => {
@@ -452,6 +472,40 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   </button>
                 </div>
                 <p class="muted small">{t("import.hint")}</p>
+              </div>
+
+              <div class="data-section">
+                <h3>{t("usage.title")}</h3>
+                <Show
+                  when={usage().length > 0}
+                  fallback={<p class="muted small">{t("usage.empty")}</p>}
+                >
+                  <table class="usage-table">
+                    <thead>
+                      <tr>
+                        <th>{t("usage.colProvider")}</th>
+                        <th>{t("usage.colKind")}</th>
+                        <th>{t("usage.colScope")}</th>
+                        <th>{t("usage.colCalls")}</th>
+                        <th>{t("usage.colTokens")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={usage()}>
+                        {(row) => (
+                          <tr>
+                            <td>{row.provider}</td>
+                            <td>{row.kind}</td>
+                            <td>{row.local ? t("usage.local") : t("usage.cloud")}</td>
+                            <td>{row.calls}</td>
+                            <td>≈{row.tokens}</td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                  <p class="muted small">{t("usage.hint")}</p>
+                </Show>
               </div>
 
               <div class="settings-actions">

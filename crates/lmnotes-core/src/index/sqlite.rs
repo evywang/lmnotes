@@ -2,7 +2,8 @@
 
 use super::schema::{
     create_vec_sql, ConceptRow, EdgeRow, MediaTask, ALTER_CONCEPTS_ALIASES, ALTER_CONCEPTS_TAGS,
-    CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES, CREATE_MEDIA_TASKS, CREATE_SUGGESTIONS,
+    CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES, CREATE_LLM_USAGE, CREATE_MEDIA_TASKS,
+    CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -374,7 +375,7 @@ impl SqliteIndex {
     pub async fn init_schema_with_vec_dim(&self, dim: usize) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!(
-            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}\n{CREATE_MEDIA_TASKS}"
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}\n{CREATE_MEDIA_TASKS}\n{CREATE_LLM_USAGE}"
         ))?;
         // 老库迁移：补 aliases 列（v0.3 FR-CAP-03）。已有该列时 ALTER 报
         // duplicate column，容忍跳过（新库 CREATE 已含，同样会走到这里）。
@@ -721,6 +722,62 @@ impl SqliteIndex {
         out.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
         Ok(out)
     }
+
+    // ============ LLM 用量（v0.8 FR-MODEL-05）============
+
+    /// 记一次 LLM 调用（脱敏：无内容，只有 provider/kind/local/tokens）。
+    pub fn record_usage(
+        &self,
+        provider: &str,
+        kind: &str,
+        local: bool,
+        tokens: u64,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO llm_usage (ts, provider, kind, local, tokens) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                chrono::Utc::now().timestamp(),
+                provider,
+                kind,
+                local as i64,
+                tokens as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 用量汇总（设置页仪表盘）：按 provider+kind 分组，次数降序。
+    pub fn usage_summary(&self) -> crate::Result<Vec<UsageRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT provider, kind, local, COUNT(*), SUM(tokens), MAX(ts)
+             FROM llm_usage GROUP BY provider, kind, local
+             ORDER BY COUNT(*) DESC, provider ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(UsageRow {
+                provider: r.get(0)?,
+                kind: r.get(1)?,
+                local: r.get::<_, i64>(2)? != 0,
+                calls: r.get(3)?,
+                tokens: r.get(4)?,
+                last_ts: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+/// 用量汇总行（FR-MODEL-05 设置页展示）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UsageRow {
+    pub provider: String,
+    pub kind: String,
+    pub local: bool,
+    pub calls: i64,
+    pub tokens: i64,
+    pub last_ts: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -890,6 +947,24 @@ mod tests {
         r.tags = vec!["x".into()];
         idx.upsert_concept(r).await.unwrap();
         assert_eq!(idx.tag_counts().unwrap(), vec![("x".to_string(), 1)]);
+    }
+
+    #[tokio::test]
+    async fn usage_record_and_summary_aggregates() {
+        // v0.8 FR-MODEL-05：记录脱敏（无内容），汇总按 provider+kind 分组。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.record_usage("glm", "chat", false, 100).unwrap();
+        idx.record_usage("glm", "chat", false, 50).unwrap();
+        idx.record_usage("ollama", "embed", true, 10).unwrap();
+        let summary = idx.usage_summary().unwrap();
+        assert_eq!(summary.len(), 2, "{summary:?}");
+        let glm = summary.iter().find(|r| r.provider == "glm").unwrap();
+        assert_eq!((glm.calls, glm.tokens), (2, 150));
+        assert!(!glm.local);
+        let ollama = summary.iter().find(|r| r.provider == "ollama").unwrap();
+        assert_eq!((ollama.calls, ollama.tokens), (1, 10));
+        assert!(ollama.local);
     }
 
     // ── filter_titles（补全候选匹配内核，FR-CAP-03）──────────────────────
