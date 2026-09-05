@@ -80,6 +80,24 @@ export function ProviderSettings(props: { onClose: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [importing, setImporting] = createSignal(false);
   const [usage, setUsage] = createSignal<UsageRow[]>([]);
+  const [autostart, setAutostart] = createSignal(false);
+
+  const refreshAutostart = async () => {
+    try {
+      setAutostart(await invoke<boolean>("get_autostart"));
+    } catch {
+      /* 读不到按关闭处理 */
+    }
+  };
+  const toggleAutostart = async (enabled: boolean) => {
+    setAutostart(enabled);
+    try {
+      await invoke("set_autostart", { enabled });
+    } catch (e) {
+      setAutostart(!enabled);
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    }
+  };
 
   const refreshUsage = async () => {
     try {
@@ -147,6 +165,7 @@ export function ProviderSettings(props: { onClose: () => void }) {
       console.error("load config", e);
     }
     void refreshUsage();
+    void refreshAutostart();
   });
 
   const save = async () => {
@@ -425,6 +444,19 @@ export function ProviderSettings(props: { onClose: () => void }) {
               </div>
 
               <LocalSttSetup />
+
+              <div class="data-section">
+                <h3>{t("residency.title")}</h3>
+                <label class="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={autostart()}
+                    onChange={(e) => void toggleAutostart(e.currentTarget.checked)}
+                  />
+                  {t("residency.autostart")}
+                </label>
+                <p class="muted small">{t("residency.hint")}</p>
+              </div>
 
               <div class="data-section">
                 <h3>{t("hotkey.title")}</h3>

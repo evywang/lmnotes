@@ -276,4 +276,7 @@ export const zh: Record<MessageKey, string> = {
   "search.semanticBadge": "语义",
   "search.semanticNote": "语义搜索已参与排序。",
   "palette.ask": "问 LMNotes",
+  "residency.title": "🏠 常驻",
+  "residency.autostart": "开机自动启动",
+  "residency.hint": "关闭主窗口 = 驻留系统托盘（全局热键与快速捕获持续可用）；托盘菜单「退出」才真正退出。",
 };

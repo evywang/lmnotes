@@ -277,6 +277,9 @@ export const en = {
   "search.semanticBadge": "semantic",
   "search.semanticNote": "Semantic search is contributing to ranking.",
   "palette.ask": "Ask LMNotes",
+  "residency.title": "🏠 Residency",
+  "residency.autostart": "Launch at system startup",
+  "residency.hint": "Closing the main window keeps LMNotes in the system tray (global hotkey & quick capture stay available). Use tray → Quit to fully exit.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

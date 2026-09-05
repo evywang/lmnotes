@@ -42,6 +42,26 @@ pub fn search(
 
 // ============ 语义混合搜索（v0.9 搜索与常驻）============
 
+// ============ 常驻（v0.9）：开机自启读写 ============
+
+#[tauri::command]
+pub fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launch = app.autolaunch();
+    if enabled {
+        launch.enable()
+    } else {
+        launch.disable()
+    }
+    .map_err(|e| e.to_string())
+}
+
 /// 混合搜索命中（侧栏语义搜索 FR-SEARCH-02 补全）。
 #[derive(serde::Serialize)]
 pub struct HybridHit {

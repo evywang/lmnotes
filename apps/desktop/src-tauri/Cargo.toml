@@ -14,7 +14,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 lmnotes-core = { path = "../../../crates/lmnotes-core" }
 lmnotes-mcp = { path = "../../../crates/lmnotes-mcp" }
-tauri = { workspace = true, features = [] }
+tauri = { workspace = true, features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-shell = "2"
