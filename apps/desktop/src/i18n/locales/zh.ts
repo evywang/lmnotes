@@ -279,4 +279,16 @@ export const zh: Record<MessageKey, string> = {
   "residency.title": "🏠 常驻",
   "residency.autostart": "开机自动启动",
   "residency.hint": "关闭主窗口 = 驻留系统托盘（全局热键与快速捕获持续可用）；托盘菜单「退出」才真正退出。",
+
+  // ── 自动备份（v0.9）───────────────────────────────────────────────────
+  "backup.title": "🗄 自动备份",
+  "backup.enabled": "定时备份（保存并重启后生效）",
+  "backup.interval": "间隔（小时）",
+  "backup.keep": "保留（份）",
+  "backup.destPrefix": "备份目录：",
+  "backup.latest": "已有 {n} 份，最新：{f}",
+  "backup.none": "尚无备份。",
+  "backup.nowBtn": "立即备份",
+  "backup.running": "备份中…",
+  "backup.hint": "zip 快照排除派生数据（.lmnotes/）；超出保留份数的旧备份自动清理。",
 };

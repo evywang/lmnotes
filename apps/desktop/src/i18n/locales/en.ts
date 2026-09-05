@@ -280,6 +280,18 @@ export const en = {
   "residency.title": "🏠 Residency",
   "residency.autostart": "Launch at system startup",
   "residency.hint": "Closing the main window keeps LMNotes in the system tray (global hotkey & quick capture stay available). Use tray → Quit to fully exit.",
+
+  // ── Backup (v0.9) ──────────────────────────────────────────────────────
+  "backup.title": "🗄 Auto backup",
+  "backup.enabled": "Scheduled backup (takes effect after restart)",
+  "backup.interval": "Interval (hours)",
+  "backup.keep": "Keep (copies)",
+  "backup.destPrefix": "Destination: ",
+  "backup.latest": "{n} backup(s), latest: {f}",
+  "backup.none": "No backups yet.",
+  "backup.nowBtn": "Back up now",
+  "backup.running": "Backing up…",
+  "backup.hint": "ZIP snapshots exclude derived data (.lmnotes/). Older copies beyond the keep limit are pruned automatically.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

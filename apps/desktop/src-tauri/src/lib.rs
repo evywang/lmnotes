@@ -1,5 +1,6 @@
 //! LMNotes 桌面应用（Tauri 2）IPC 壳。
 
+mod backup;
 mod commands;
 mod llm_config;
 mod media_tasks;
@@ -383,6 +384,8 @@ pub fn run() {
                 );
             }
             setup_residency(app)?;
+            // v0.9 自动备份：enabled 时启动定时任务（读一次配置，改配置重启生效）
+            backup::spawn_backup_task(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -391,6 +394,8 @@ pub fn run() {
             commands::search_hybrid,
             commands::get_autostart,
             commands::set_autostart,
+            commands::get_backup_status,
+            commands::backup_now,
             commands::list_note_titles,
             commands::list_snapshots,
             commands::read_snapshot,

@@ -1593,23 +1593,78 @@ fn mime_from_ext(ext: &str) -> String {
 }
 
 // ============ 数据导出（FR-STORE-05，v0.5）============
+// （递归收集逻辑 v0.9 移至 backup::collect_files 与自动备份共用）
 
-/// 递归收集 vault 内需导出的相对路径（排除 .lmnotes/ 派生数据）。
-fn collect_export_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                // 跳过派生数据目录
-                if p.file_name().map(|n| n == ".lmnotes").unwrap_or(false) {
-                    continue;
-                }
-                collect_export_files(&p, out);
-            } else {
-                out.push(p);
-            }
-        }
-    }
+// ============ 自动备份（v0.9「搜索与常驻」）============
+
+#[derive(serde::Serialize)]
+pub struct BackupStatus {
+    pub enabled: bool,
+    pub dest_dir: String,
+    pub interval_hours: u64,
+    pub keep: usize,
+    /// dest_dir 中现有备份数（0 = 从未备份）。
+    pub count: usize,
+    /// 最新一份备份文件名（None = 无）。
+    pub latest: Option<String>,
+}
+
+fn backup_dest_dir(cfg: &crate::llm_config::BackupConfig, root: &Path) -> PathBuf {
+    cfg.dest_dir
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::backup::default_dest_dir(root))
+}
+
+#[tauri::command]
+pub fn get_backup_status() -> Result<BackupStatus, String> {
+    let cfg = crate::llm_config::Config::load_or_default();
+    let root = vault_root();
+    let dest = backup_dest_dir(&cfg.backup, &root);
+    let vault_name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "default".into());
+    let mut names: Vec<String> = std::fs::read_dir(&dest)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    (n.starts_with(&format!("lmnotes-{vault_name}-")) && n.ends_with(".zip"))
+                        .then_some(n)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    Ok(BackupStatus {
+        enabled: cfg.backup.enabled,
+        dest_dir: dest.to_string_lossy().into_owned(),
+        interval_hours: cfg.backup.interval_hours,
+        keep: cfg.backup.keep,
+        count: names.len(),
+        latest: names.last().cloned(),
+    })
+}
+
+/// 手动立即备份（与定时任务同一实现：zip + 修剪）。
+#[tauri::command]
+pub async fn backup_now() -> Result<String, String> {
+    let cfg = crate::llm_config::Config::load_or_default();
+    let root = vault_root();
+    let dest = backup_dest_dir(&cfg.backup, &root);
+    let keep = cfg.backup.keep.max(1);
+    let (path, n, removed) = tauri::async_runtime::spawn_blocking(move || {
+        crate::backup::run_backup_once(&root, &dest, keep)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(format!(
+        "{} 个文件 → {}（清理 {} 份旧备份）",
+        n,
+        path.display(),
+        removed.len()
+    ))
 }
 
 /// 导出 vault 为 zip（流式，排除 .lmnotes/）。dest 为绝对路径。
@@ -1618,43 +1673,17 @@ fn collect_export_files(dir: &Path, out: &mut Vec<PathBuf>) {
 pub async fn export_vault_zip(dest: String, app: tauri::AppHandle) -> Result<u64, String> {
     use tauri::Emitter;
     let root = vault_root();
-    let mut files = Vec::new();
-    collect_export_files(&root, &mut files);
-    files.sort();
-    let out_path = PathBuf::from(&dest);
-    if let Some(pp) = out_path.parent() {
-        tokio::fs::create_dir_all(pp)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    // zip 写放阻塞线程
-    let root_c = root.clone();
-    let files_c = files.clone();
-    let dest_c = dest.clone();
+    let dest_path = PathBuf::from(&dest);
+    // zip 写放阻塞线程；进度事件经回调透出（zip 主体逻辑与自动备份共用）
+    let app_c = app.clone();
     let count = tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
-        let file = std::fs::File::create(&dest_c).map_err(|e| e.to_string())?;
-        let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        let total = files_c.len() as u64;
-        for (i, abs) in files_c.iter().enumerate() {
-            let rel = abs
-                .strip_prefix(&root_c)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace(BS, "/");
-            zip.start_file(&rel, opts).map_err(|e| e.to_string())?;
-            let mut f = std::fs::File::open(abs).map_err(|e| e.to_string())?;
-            std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-            if i % 25 == 0 {
-                let _ = app.emit(
-                    "export-progress",
-                    serde_json::json!({ "done": i as u64, "total": total }),
-                );
-            }
-        }
-        zip.finish().map_err(|e| e.to_string())?;
-        Ok(total)
+        let progress = move |done: u64, total: u64| {
+            let _ = app_c.emit(
+                "export-progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        };
+        crate::backup::zip_vault_to(&root, &dest_path, Some(&progress))
     })
     .await
     .map_err(|e| e.to_string())??;
