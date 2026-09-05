@@ -1,8 +1,9 @@
 //! SQLite 元数据索引 + sqlite-vec 向量表实现。
 
 use super::schema::{
-    create_vec_sql, ConceptRow, EdgeRow, MediaTask, ALTER_CONCEPTS_ALIASES, CREATE_CHAT_HISTORY,
-    CREATE_CONCEPTS, CREATE_EDGES, CREATE_MEDIA_TASKS, CREATE_SUGGESTIONS,
+    create_vec_sql, ConceptRow, EdgeRow, MediaTask, ALTER_CONCEPTS_ALIASES, ALTER_CONCEPTS_TAGS,
+    CREATE_CHAT_HISTORY, CREATE_CONCEPTS, CREATE_EDGES, CREATE_LLM_USAGE, CREATE_MEDIA_TASKS,
+    CREATE_SUGGESTIONS,
 };
 use crate::backend::IndexBackend;
 use crate::Result;
@@ -64,6 +65,7 @@ fn row_from_h(rs: &mut rusqlite::Rows<'_>) -> Result<Option<ConceptRow>> {
             mtime: r.get(4)?,
             content_hash: r.get(5)?,
             aliases: parse_aliases(&r.get::<_, String>(6)?),
+            tags: parse_aliases(&r.get::<_, String>(7)?),
         })),
         None => Ok(None),
     }
@@ -103,8 +105,8 @@ impl IndexBackend for SqliteIndex {
     async fn upsert_concept(&self, row: ConceptRow) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO concepts (id, path, type_, title, mtime, content_hash, aliases)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT OR REPLACE INTO concepts (id, path, type_, title, mtime, content_hash, aliases, tags)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             rusqlite::params![
                 row.id,
                 row.path,
@@ -112,7 +114,8 @@ impl IndexBackend for SqliteIndex {
                 row.title,
                 row.mtime,
                 row.content_hash,
-                serde_json::to_string(&row.aliases).unwrap_or_else(|_| "[]".into())
+                serde_json::to_string(&row.aliases).unwrap_or_else(|_| "[]".into()),
+                serde_json::to_string(&row.tags).unwrap_or_else(|_| "[]".into())
             ],
         )?;
         Ok(())
@@ -147,7 +150,7 @@ impl IndexBackend for SqliteIndex {
     fn get_concept(&self, id: &str) -> Result<Option<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts WHERE id = ?1",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases, tags FROM concepts WHERE id = ?1",
         )?;
         let mut rs = stmt.query([id])?;
         row_from_h(&mut rs)
@@ -156,7 +159,7 @@ impl IndexBackend for SqliteIndex {
     fn get_concept_by_path(&self, path: &str) -> Result<Option<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts WHERE path = ?1",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases, tags FROM concepts WHERE path = ?1",
         )?;
         let mut rs = stmt.query([path])?;
         row_from_h(&mut rs)
@@ -203,7 +206,7 @@ impl IndexBackend for SqliteIndex {
     fn all_concepts(&self) -> Result<Vec<ConceptRow>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, path, type_, title, mtime, content_hash, aliases FROM concepts ORDER BY path",
+            "SELECT id, path, type_, title, mtime, content_hash, aliases, tags FROM concepts ORDER BY path",
         )?;
         let rows = stmt.query_map([], |r| {
             Ok(ConceptRow {
@@ -214,6 +217,7 @@ impl IndexBackend for SqliteIndex {
                 mtime: r.get(4)?,
                 content_hash: r.get(5)?,
                 aliases: parse_aliases(&r.get::<_, String>(6)?),
+                tags: parse_aliases(&r.get::<_, String>(7)?),
             })
         })?;
         let mut out = Vec::new();
@@ -371,11 +375,18 @@ impl SqliteIndex {
     pub async fn init_schema_with_vec_dim(&self, dim: usize) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute_batch(&format!(
-            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}\n{CREATE_MEDIA_TASKS}"
+            "{CREATE_CONCEPTS}\n{CREATE_EDGES}\n{CREATE_SUGGESTIONS}\n{CREATE_CHAT_HISTORY}\n{CREATE_MEDIA_TASKS}\n{CREATE_LLM_USAGE}"
         ))?;
         // 老库迁移：补 aliases 列（v0.3 FR-CAP-03）。已有该列时 ALTER 报
         // duplicate column，容忍跳过（新库 CREATE 已含，同样会走到这里）。
         if let Err(e) = conn.execute_batch(ALTER_CONCEPTS_ALIASES) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(e.into());
+            }
+        }
+        // 老库迁移：补 tags 列（v0.7 FR-SEARCH-05），同上容错。
+        if let Err(e) = conn.execute_batch(ALTER_CONCEPTS_TAGS) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
                 return Err(e.into());
@@ -658,6 +669,115 @@ impl SqliteIndex {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
+
+    // ============ 时间线 / 标签聚合（v0.7 FR-SEARCH-05）============
+
+    /// 时间线：最近变更的 concept，mtime 降序（派生视图只读查询）。
+    pub fn list_timeline(&self, limit: usize) -> crate::Result<Vec<ConceptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, path, type_, title, mtime, content_hash, aliases, tags
+             FROM concepts ORDER BY mtime DESC, path ASC LIMIT ?1",
+        )?;
+        let mut rs = stmt.query([limit as i64])?;
+        let mut out = Vec::new();
+        while let Some(r) = row_from_h(&mut rs)? {
+            out.push(r);
+        }
+        Ok(out)
+    }
+
+    /// 标签计数（标签云）：全表读 tags JSON 在 Rust 端聚合。
+    /// 排序：count 降序，同 count 按字典序——结果稳定可测。
+    pub fn tag_counts(&self) -> crate::Result<Vec<(String, i64)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT tags FROM concepts")?;
+        let mut counts: std::collections::BTreeMap<String, i64> = Default::default();
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        for json in rows {
+            let tags: Vec<String> =
+                serde_json::from_str(&json.unwrap_or_default()).unwrap_or_default();
+            for t in tags {
+                *counts.entry(t).or_insert(0) += 1;
+            }
+        }
+        let mut out: Vec<(String, i64)> = counts.into_iter().collect();
+        out.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Ok(out)
+    }
+
+    /// 按标签过滤：Rust 端 JSON contains（个人库量级足够，不建倒排表）。
+    pub fn notes_with_tag(&self, tag: &str) -> crate::Result<Vec<ConceptRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, path, type_, title, mtime, content_hash, aliases, tags FROM concepts",
+        )?;
+        let mut rs = stmt.query([])?;
+        let mut out = Vec::new();
+        while let Some(r) = row_from_h(&mut rs)? {
+            if r.tags.iter().any(|t| t == tag) {
+                out.push(r);
+            }
+        }
+        out.sort_by(|a, b| b.mtime.cmp(&a.mtime).then_with(|| a.path.cmp(&b.path)));
+        Ok(out)
+    }
+
+    // ============ LLM 用量（v0.8 FR-MODEL-05）============
+
+    /// 记一次 LLM 调用（脱敏：无内容，只有 provider/kind/local/tokens）。
+    pub fn record_usage(
+        &self,
+        provider: &str,
+        kind: &str,
+        local: bool,
+        tokens: u64,
+    ) -> crate::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO llm_usage (ts, provider, kind, local, tokens) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                chrono::Utc::now().timestamp(),
+                provider,
+                kind,
+                local as i64,
+                tokens as i64
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// 用量汇总（设置页仪表盘）：按 provider+kind 分组，次数降序。
+    pub fn usage_summary(&self) -> crate::Result<Vec<UsageRow>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT provider, kind, local, COUNT(*), SUM(tokens), MAX(ts)
+             FROM llm_usage GROUP BY provider, kind, local
+             ORDER BY COUNT(*) DESC, provider ASC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(UsageRow {
+                provider: r.get(0)?,
+                kind: r.get(1)?,
+                local: r.get::<_, i64>(2)? != 0,
+                calls: r.get(3)?,
+                tokens: r.get(4)?,
+                last_ts: r.get(5)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+}
+
+/// 用量汇总行（FR-MODEL-05 设置页展示）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UsageRow {
+    pub provider: String,
+    pub kind: String,
+    pub local: bool,
+    pub calls: i64,
+    pub tokens: i64,
+    pub last_ts: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -680,6 +800,7 @@ mod tests {
             mtime: 1000,
             content_hash: "abc".into(),
             aliases: vec![],
+            tags: vec![],
         }
     }
 
@@ -743,6 +864,109 @@ mod tests {
         );
     }
 
+    // ── tags 列 + 时间线/标签聚合（v0.7 FR-SEARCH-05）────────────────────
+
+    #[tokio::test]
+    async fn tags_round_trip_timeline_and_counts() {
+        // v0.7 FR-SEARCH-05：tags 进索引（JSON 列，照 v0.3 aliases 惯例），
+        // 时间线按 mtime 倒序，标签计数聚合。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        let mut a = row("nt_a", "notes/a.md");
+        a.mtime = 2;
+        a.tags = vec!["ai".into(), "rust".into()];
+        let mut b = row("nt_b", "notes/b.md");
+        b.mtime = 5;
+        b.tags = vec!["ai".into()];
+        idx.upsert_concept(a).await.unwrap();
+        idx.upsert_concept(b).await.unwrap();
+
+        // 时间线：mtime 降序 + limit
+        let tl = idx.list_timeline(10).unwrap();
+        assert_eq!(
+            tl.iter().map(|r| r.path.as_str()).collect::<Vec<_>>(),
+            vec!["notes/b.md", "notes/a.md"]
+        );
+        assert_eq!(idx.list_timeline(1).unwrap().len(), 1);
+
+        // 标签计数：count 降序，同 count 字典序稳定
+        assert_eq!(
+            idx.tag_counts().unwrap(),
+            vec![("ai".to_string(), 2), ("rust".to_string(), 1)]
+        );
+
+        // 按标签过滤
+        assert_eq!(idx.notes_with_tag("rust").unwrap().len(), 1);
+        assert_eq!(idx.notes_with_tag("ai").unwrap().len(), 2);
+        assert!(idx.notes_with_tag("none").unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn tags_default_empty_and_bad_json_tolerated() {
+        // 老行 DEFAULT '[]' 读回空；坏 JSON 容错为空（与 parse_aliases 同策略）。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        let mut r = row("nt_c", "notes/c.md");
+        r.tags = vec![];
+        idx.upsert_concept(r).await.unwrap();
+        assert!(idx.get_concept("nt_c").unwrap().unwrap().tags.is_empty());
+
+        let conn = idx.conn.lock().unwrap();
+        conn.execute("UPDATE concepts SET tags = 'not-json'", [])
+            .unwrap();
+        drop(conn);
+        assert!(idx.tag_counts().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn migration_adds_tags_to_legacy_schema() {
+        // 老库（无 tags 列，含 aliases）升级：init_schema 补列不丢数据。
+        let idx = SqliteIndex::in_memory().unwrap();
+        {
+            let conn = idx.conn.lock().unwrap();
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS concepts (
+                    id          TEXT PRIMARY KEY,
+                    path        TEXT NOT NULL UNIQUE,
+                    type_       TEXT NOT NULL,
+                    title       TEXT,
+                    mtime       INTEGER NOT NULL,
+                    content_hash TEXT NOT NULL,
+                    aliases     TEXT NOT NULL DEFAULT '[]'
+                );
+                INSERT INTO concepts VALUES ('nt_old', 'old.md', 'note', 'Old', 1, 'h', '[]');",
+            )
+            .unwrap();
+        }
+        idx.init_schema().await.unwrap();
+        let got = idx.get_concept("nt_old").unwrap().unwrap();
+        assert_eq!(got.title.as_deref(), Some("Old"));
+        assert!(got.tags.is_empty());
+        // 迁移后可继续写入 tags
+        let mut r = row("nt_new", "new.md");
+        r.tags = vec!["x".into()];
+        idx.upsert_concept(r).await.unwrap();
+        assert_eq!(idx.tag_counts().unwrap(), vec![("x".to_string(), 1)]);
+    }
+
+    #[tokio::test]
+    async fn usage_record_and_summary_aggregates() {
+        // v0.8 FR-MODEL-05：记录脱敏（无内容），汇总按 provider+kind 分组。
+        let idx = SqliteIndex::in_memory().unwrap();
+        idx.init_schema().await.unwrap();
+        idx.record_usage("glm", "chat", false, 100).unwrap();
+        idx.record_usage("glm", "chat", false, 50).unwrap();
+        idx.record_usage("ollama", "embed", true, 10).unwrap();
+        let summary = idx.usage_summary().unwrap();
+        assert_eq!(summary.len(), 2, "{summary:?}");
+        let glm = summary.iter().find(|r| r.provider == "glm").unwrap();
+        assert_eq!((glm.calls, glm.tokens), (2, 150));
+        assert!(!glm.local);
+        let ollama = summary.iter().find(|r| r.provider == "ollama").unwrap();
+        assert_eq!((ollama.calls, ollama.tokens), (1, 10));
+        assert!(ollama.local);
+    }
+
     // ── filter_titles（补全候选匹配内核，FR-CAP-03）──────────────────────
 
     use crate::index::schema::filter_titles;
@@ -757,6 +981,7 @@ mod tests {
                 mtime: 0,
                 content_hash: "h".into(),
                 aliases: vec!["Attention".into()],
+                tags: vec![],
             },
             ConceptRow {
                 id: "nt_2".into(),
@@ -766,6 +991,7 @@ mod tests {
                 mtime: 0,
                 content_hash: "h".into(),
                 aliases: vec![],
+                tags: vec![],
             },
             ConceptRow {
                 id: "nt_3".into(),
@@ -775,6 +1001,7 @@ mod tests {
                 mtime: 0,
                 content_hash: "h".into(),
                 aliases: vec![],
+                tags: vec![],
             },
         ]
     }

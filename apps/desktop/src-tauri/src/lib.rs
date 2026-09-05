@@ -9,8 +9,6 @@ use lmnotes_core::backend::fs::FsBackend;
 use lmnotes_core::index::sqlite::SqliteIndex;
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::indexer::{walk_and_index, Indexer};
-use lmnotes_core::llm::guard::GuardConfig;
-use lmnotes_core::llm::routing::{Registry, Routing};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::SearchEngine;
 use notify::{RecursiveMode, Watcher};
@@ -31,10 +29,34 @@ struct HoldWatcher(Option<notify::RecommendedWatcher>);
 #[allow(dead_code)]
 struct HoldMcp;
 
-/// 构建默认 Registry + Routing（M1b-T10：从 config.json 加载）。
-fn build_registry_from_config() -> (Registry, Routing, GuardConfig) {
-    let cfg = llm_config::Config::load_or_default();
-    cfg.build()
+/// 切换快速捕获浮窗（FR-CAP-01，v0.7）：存在则 show/hide 切换，
+/// 不存在则创建（同一 dist 的 `#quick-capture` 路由，main.tsx 分流渲染精简 UI）。
+fn toggle_quick_capture(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window("quick-capture") {
+        if win.is_visible().unwrap_or(false) {
+            let _ = win.hide();
+        } else {
+            let _ = win.show();
+            let _ = win.set_focus();
+        }
+    } else {
+        let built = tauri::WebviewWindowBuilder::new(
+            app,
+            "quick-capture",
+            tauri::WebviewUrl::App("index.html#quick-capture".into()),
+        )
+        .title("LMNotes")
+        .inner_size(460.0, 200.0)
+        .decorations(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .build();
+        if let Err(e) = built {
+            eprintln!("[hotkey] create quick-capture window failed: {e}");
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,10 +70,26 @@ pub fn run() {
     let fulltext = Arc::new(TantivyIndex::open(lmnotes_dir.join("tantivy")).expect("open tantivy"));
     let indexer = Arc::new(Indexer::new(meta.clone(), fulltext.clone()));
     let engine = Arc::new(SearchEngine::new(meta.clone(), fulltext.clone()));
-    let (registry, routing, guard_cfg) = build_registry_from_config();
+    // LLM 用量记录（v0.8 FR-MODEL-05）：sink 只做 channel send（非阻塞），
+    // 消费任务落 llm_usage 表；provider 注册时统一包裹（见 build_with_sink）。
+    let (usage_tx, mut usage_rx) =
+        tokio::sync::mpsc::unbounded_channel::<lmnotes_core::llm::usage::UsageEvent>();
+    let usage_sink: lmnotes_core::llm::usage::UsageSink = Arc::new(move |e| {
+        let _ = usage_tx.send(e);
+    });
+    let (registry, routing, guard_cfg) =
+        llm_config::Config::load_or_default().build_with_sink(usage_sink);
     let registry = Arc::new(registry);
     let routing = Arc::new(routing);
     let guard_cfg = Arc::new(guard_cfg);
+    let usage_db = meta.clone();
+    tauri::async_runtime::spawn(async move {
+        while let Some(e) = usage_rx.recv().await {
+            if let Err(err) = usage_db.record_usage(&e.provider, e.kind, e.local, e.tokens_est) {
+                eprintln!("[usage] record failed: {err}");
+            }
+        }
+    });
 
     // 首启探测：检测 Provider 健康，不可用时日志提示（O6c）
     tauri::async_runtime::spawn(async {
@@ -244,6 +282,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        // 全局快捷键（FR-CAP-01，v0.7）：CmdOrCtrl+Shift+L 切换快速捕获浮窗。
+        // 注册在 setup 内（Rust 侧 GlobalShortcutExt，不经过 JS 权限）。
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        toggle_quick_capture(app);
+                    }
+                })
+                .build(),
+        )
         .manage(indexer)
         .manage(engine)
         .manage(meta.clone() as Arc<dyn lmnotes_core::backend::IndexBackend>)
@@ -259,6 +308,15 @@ pub fn run() {
             let worker_deps = worker_deps;
             // 媒体任务后台 worker（v0.5 FR-MEDIA-04）：running→pending 兜底 + 常驻循环
             media_tasks::spawn_worker(app.handle().clone(), worker_deps);
+            // 全局快捷键注册（v0.7 FR-CAP-01；v0.8 起可配置 config.capture.hotkey，
+            // 保存后重启生效）。注册失败降级：打日志不阻塞，应用内捕获不受影响。
+            use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            let hotkey = llm_config::Config::load_or_default().capture.hotkey;
+            if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
+                eprintln!(
+                    "[hotkey] register {hotkey} failed: {e} (被占用？可在设置中修改热键；应用内 Ctrl+N 捕获不受影响)"
+                );
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -296,6 +354,13 @@ pub fn run() {
             commands::load_chat_history,
             commands::clear_chat_history,
             commands::create_note,
+            commands::open_or_create_daily,
+            commands::list_timeline,
+            commands::list_tags,
+            commands::list_notes_with_tag,
+            commands::import_vault,
+            commands::get_usage_summary,
+            commands::generate_review,
             commands::import_note,
             commands::import_document,
             commands::list_tree,

@@ -6,6 +6,7 @@ pub mod backend;
 pub mod error;
 pub mod graph;
 pub mod id;
+pub mod import;
 pub mod index;
 pub mod indexer;
 pub mod llm;

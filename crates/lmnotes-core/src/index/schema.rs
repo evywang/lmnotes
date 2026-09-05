@@ -9,7 +9,8 @@ CREATE TABLE IF NOT EXISTS concepts (
     title       TEXT,
     mtime       INTEGER NOT NULL,
     content_hash TEXT NOT NULL,
-    aliases     TEXT NOT NULL DEFAULT '[]'
+    aliases     TEXT NOT NULL DEFAULT '[]',
+    tags        TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_concepts_path ON concepts(path);
 ";
@@ -18,6 +19,24 @@ CREATE INDEX IF NOT EXISTS idx_concepts_path ON concepts(path);
 /// 对已有列的库执行会报 duplicate column——调用方容忍并跳过。
 pub const ALTER_CONCEPTS_ALIASES: &str =
     "ALTER TABLE concepts ADD COLUMN aliases TEXT NOT NULL DEFAULT '[]'";
+
+/// 老库迁移（v0.7 FR-SEARCH-05）：tags 供标签云/过滤聚合。
+/// 同 aliases：JSON 数组存列，duplicate column 容错跳过。
+pub const ALTER_CONCEPTS_TAGS: &str =
+    "ALTER TABLE concepts ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'";
+
+/// LLM 用量表（v0.8 FR-MODEL-05）：只记 provider/kind/本地或云端/估算 token，
+/// 不记任何内容（§7.4 脱敏要求）。
+pub const CREATE_LLM_USAGE: &str = "
+CREATE TABLE IF NOT EXISTS llm_usage (
+    ts      INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    kind    TEXT NOT NULL,
+    local   INTEGER NOT NULL,
+    tokens  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_llm_usage_ts ON llm_usage(ts);
+";
 
 /// SQLite edges 表：图谱邻接（增量，见 ADR-0003 F5）。
 pub const CREATE_EDGES: &str = "
@@ -102,6 +121,8 @@ pub struct ConceptRow {
     pub content_hash: String,
     /// 别名（frontmatter aliases，JSON 序列化存列；v0.3 补全用）。
     pub aliases: Vec<String>,
+    /// 标签（frontmatter tags，JSON 序列化存列；v0.7 标签云/过滤用）。
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

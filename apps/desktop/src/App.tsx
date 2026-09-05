@@ -1,17 +1,21 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
+import { open, message as dialogMessage } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
 import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { VoiceCapture } from "./voice/VoiceCapture";
-import { MediaTasksButton, MediaTasksPanel, initMediaTaskFeed } from "./voice/MediaTasks";
+import { MediaTasksButton, MediaTasksPanel, initMediaTaskFeed, openMediaTasks } from "./voice/MediaTasks";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
 import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
+import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
+import { TimelineView } from "./components/TimelineView";
+import { TagCloud } from "./components/TagCloud";
 import { t } from "./i18n";
 
 /** 侧栏当前库指示（v0.4 多库）：显示库名，点击打开设置切换。 */
@@ -41,6 +45,10 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [chatOpen, setChatOpen] = createSignal(false);
   const [graphOpen, setGraphOpen] = createSignal(false);
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [timelineOpen, setTimelineOpen] = createSignal(false);
+  const [tagFilter, setTagFilter] = createSignal<string | null>(null);
+  const [reviewBusy, setReviewBusy] = createSignal(false);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
   const [treeOpen, setTreeOpen] = createSignal(false);
 
@@ -70,8 +78,23 @@ export function App() {
       e.preventDefault();
       setVoiceOpen(true);
     }
+    // 命令面板（FR-SEARCH-01）：Ctrl/Cmd+K
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
+      e.preventDefault();
+      setPaletteOpen(true);
+    }
   };
-  onMount(() => initMediaTaskFeed());
+  onMount(() => {
+    initMediaTaskFeed();
+    // 全局快捷键浮窗（FR-CAP-01）保存成功 / 库导入（FR-STORE-06）完成后
+    // 刷新文件树与搜索结果
+    const refresh = () => {
+      setTreeRefresh((n) => n + 1);
+      runSearch("");
+    };
+    void listen("quick-note-saved", refresh);
+    void listen("vault-changed", refresh);
+  });
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 
@@ -137,6 +160,55 @@ export function App() {
     }
   };
 
+  // 今日笔记（FR-SEARCH-05）：幂等打开/创建，侧栏按钮与命令面板共用。
+  const openDaily = async () => {
+    try {
+      const path = await invoke<string>("open_or_create_daily");
+      setActivePath(path);
+      setTreeRefresh((n) => n + 1);
+    } catch (e) {
+      console.error("open daily", e);
+    }
+  };
+
+  // 打开时间线（FR-SEARCH-05）：tag 为空 = 全量时间线，非空 = 标签过滤列表。
+  const openTimeline = (tag: string | null) => {
+    setTagFilter(tag);
+    setTimelineOpen(true);
+  };
+
+  // 每日/每周回顾（FR-LLM-07，v0.8）：LLM 生成耗时，侧栏显示进行中提示。
+  const generateReview = async (range: "daily" | "weekly") => {
+    if (reviewBusy()) return;
+    setReviewBusy(true);
+    try {
+      const path = await invoke<string>("generate_review", { range });
+      setActivePath(path);
+      setTreeRefresh((n) => n + 1);
+      runSearch("");
+    } catch (e) {
+      console.error("generate review", e);
+      void dialogMessage(String(e), { title: "LMNotes", kind: "error" });
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
+  // 命令面板动作表（FR-SEARCH-01）：标签走 i18n，执行闭包复用既有入口。
+  const paletteActions = (): PaletteAction[] => [
+    { id: "new-note", icon: "📝", label: t("palette.newNote"), run: () => void createNote() },
+    { id: "quick-capture", icon: "⚡", label: t("palette.quickCapture"), run: () => setCaptureOpen(true) },
+    { id: "voice", icon: "🎤", label: t("palette.voice"), run: () => setVoiceOpen(true) },
+    { id: "chat", icon: "💬", label: t("palette.chat"), run: () => setChatOpen(true) },
+    { id: "graph", icon: "🕸", label: t("palette.graph"), run: () => setGraphOpen(true) },
+    { id: "timeline", icon: "🕘", label: t("palette.timeline"), run: () => openTimeline(null) },
+    { id: "daily", icon: "📅", label: t("palette.daily"), run: () => void openDaily() },
+    { id: "daily-review", icon: "🗓", label: t("palette.dailyReview"), run: () => void generateReview("daily") },
+    { id: "weekly-review", icon: "📆", label: t("palette.weeklyReview"), run: () => void generateReview("weekly") },
+    { id: "tasks", icon: "⏳", label: t("palette.tasks"), run: () => openMediaTasks() },
+    { id: "settings", icon: "⚙", label: t("palette.settings"), run: () => setSettingsOpen(true) },
+  ];
+
   return (
     <>
       <div class="layout">
@@ -171,6 +243,16 @@ export function App() {
           <button class="chat-btn" onClick={() => setGraphOpen(true)}>
             {t("app.graphBtn")}
           </button>
+          <button class="chat-btn" onClick={() => void openDaily()} title={t("app.dailyTooltip")}>
+            {t("app.dailyBtn")}
+          </button>
+          <button class="chat-btn" onClick={() => openTimeline(null)}>
+            {t("app.timelineBtn")}
+          </button>
+          <TagCloud onPick={(tag) => openTimeline(tag)} />
+          <Show when={reviewBusy()}>
+            <p class="muted small">{t("review.generating")}</p>
+          </Show>
           <Show when={searching()}>
             <p class="muted">{t("app.searching")}</p>
           </Show>
@@ -227,6 +309,14 @@ export function App() {
         ⚙
       </button>
 
+      {/* 命令面板（FR-SEARCH-01） */}
+      <CommandPalette
+        open={paletteOpen()}
+        onClose={() => setPaletteOpen(false)}
+        onOpenNote={(path) => setActivePath(path)}
+        actions={paletteActions}
+      />
+
       {/* 文本输入对话框宿主（应用名标题，替代 window.prompt） */}
       <PromptDialogHost />
 
@@ -260,6 +350,16 @@ export function App() {
           onNavigate={(path) => {
             setActivePath(path);
             setGraphOpen(false);
+          }}
+        />
+      </Show>
+      <Show when={timelineOpen()}>
+        <TimelineView
+          tag={tagFilter()}
+          onClose={() => setTimelineOpen(false)}
+          onOpen={(path) => {
+            setActivePath(path);
+            setTimelineOpen(false);
           }}
         />
       </Show>

@@ -7,7 +7,7 @@
 
 use lmnotes_core::backend::IndexBackend;
 use lmnotes_core::graph::{self, EdgeKind, GraphData};
-use lmnotes_core::index::schema::{filter_titles, NoteTitleHit};
+use lmnotes_core::index::schema::{filter_titles, ConceptRow, NoteTitleHit};
 use lmnotes_core::index::tantivy::TantivyIndex;
 use lmnotes_core::index::SqliteIndex;
 use lmnotes_core::indexer::Indexer;
@@ -138,6 +138,16 @@ pub async fn save_concept(
     Ok(())
 }
 
+/// 每日笔记 bundle-relative 路径：notes/daily/YYYY-MM-DD.md（v0.7 FR-SEARCH-05 抽出共享）。
+fn daily_note_rel(date: &str) -> String {
+    format!("notes/daily/{date}.md")
+}
+
+/// 每日笔记初始内容（OKF frontmatter：type: daily，title = 日期）。
+fn daily_header(date: &str, id: &str) -> String {
+    format!("---\ntype: daily\nid: {id}\ntitle: {date}\n---\n\n# {date}\n\n")
+}
+
 /// 快速捕获：写入当日 daily note（不存在则创建）。
 /// 返回 daily note 的相对路径，便于前端打开。
 #[tauri::command]
@@ -145,16 +155,13 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
     use chrono::Utc;
     let root = vault_root();
     let date = Utc::now().format("%Y-%m-%d").to_string();
-    let daily_path = format!("notes/daily/{date}.md");
+    let daily_path = daily_note_rel(&date);
     let full = root.join(&daily_path);
 
     // 若不存在，创建带 frontmatter 的 daily note
     if !full.exists() {
         let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
-        let header = format!(
-            "---\ntype: daily\nid: {id}\ntitle: {date}\n---\n\n# {date}\n\n",
-            date = date
-        );
+        let header = daily_header(&date, &id);
         if let Some(p) = full.parent() {
             tokio::fs::create_dir_all(p)
                 .await
@@ -179,6 +186,409 @@ pub async fn quick_capture(text: String) -> Result<String, String> {
     Ok(daily_path)
 }
 
+/// 今日笔记（v0.7 FR-SEARCH-05）：不存在则创建，幂等不覆盖已有内容。
+/// 返回相对路径供前端打开。与 quick_capture 共用 daily_note_rel/daily_header。
+#[tauri::command]
+pub async fn open_or_create_daily() -> Result<String, String> {
+    use chrono::Utc;
+    let root = vault_root();
+    let date = Utc::now().format("%Y-%m-%d").to_string();
+    let daily_path = daily_note_rel(&date);
+    let full = root.join(&daily_path);
+    if !full.exists() {
+        let id = lmnotes_core::id::new_note_id(Utc::now().naive_utc());
+        let header = daily_header(&date, &id);
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, header)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(daily_path)
+}
+
+/// 时间线条目（FR-SEARCH-05）：前端展示所需字段子集。
+#[derive(serde::Serialize)]
+pub struct TimelineEntry {
+    pub path: String,
+    pub title: Option<String>,
+    #[serde(rename = "type")]
+    pub type_: String,
+    pub mtime: i64,
+}
+
+impl From<ConceptRow> for TimelineEntry {
+    fn from(r: ConceptRow) -> Self {
+        Self {
+            path: r.path,
+            title: r.title,
+            type_: r.type_,
+            mtime: r.mtime,
+        }
+    }
+}
+
+/// 标签计数（FR-SEARCH-05）：标签云数据。
+#[derive(serde::Serialize)]
+pub struct TagCount {
+    pub tag: String,
+    pub count: i64,
+}
+
+/// 时间线（FR-SEARCH-05）：最近变更笔记，mtime 降序。
+#[tauri::command]
+pub fn list_timeline(
+    limit: Option<usize>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<TimelineEntry>, String> {
+    let rows = sqlite
+        .list_timeline(limit.unwrap_or(200))
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(TimelineEntry::from).collect())
+}
+
+/// 标签云（FR-SEARCH-05）：全部标签及笔记数，count 降序。
+#[tauri::command]
+pub fn list_tags(sqlite: State<'_, Arc<SqliteIndex>>) -> Result<Vec<TagCount>, String> {
+    let counts = sqlite.tag_counts().map_err(|e| e.to_string())?;
+    Ok(counts
+        .into_iter()
+        .map(|(tag, count)| TagCount { tag, count })
+        .collect())
+}
+
+/// 按标签过滤笔记（FR-SEARCH-05）。
+#[tauri::command]
+pub fn list_notes_with_tag(
+    tag: String,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<TimelineEntry>, String> {
+    let rows = sqlite.notes_with_tag(&tag).map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().map(TimelineEntry::from).collect())
+}
+
+// ============ 库导入（FR-STORE-06，v0.8）============
+
+/// 资源扩展名 → assets kind；None = 不识别（跳过并警告）。
+fn asset_kind_of(ext: &str) -> Option<&'static str> {
+    match ext {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "svg" | "bmp" => Some("img"),
+        "mp3" | "wav" | "m4a" | "ogg" | "flac" | "aac" | "opus" => Some("audio"),
+        "mp4" | "webm" | "mov" | "mkv" | "avi" => Some("video"),
+        _ => None,
+    }
+}
+
+/// 递归扫描源目录：md → 文本清单，识别的扩展 → 字节清单，其余跳过并警告。
+/// 排除 `.obsidian` / `.git` / `.trash` / `node_modules` 与系统杂项文件。
+fn scan_source_dir(
+    dir: &Path,
+    prefix: &str,
+    md_out: &mut Vec<(String, String)>,
+    asset_out: &mut Vec<(String, Vec<u8>, String)>,
+    warnings: &mut Vec<String>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = if prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{prefix}/{name}")
+        };
+        let path = entry.path();
+        if path.is_dir() {
+            if matches!(
+                name.as_str(),
+                ".obsidian" | ".git" | ".trash" | "node_modules"
+            ) {
+                continue;
+            }
+            scan_source_dir(&path, &rel, md_out, asset_out, warnings)?;
+        } else if matches!(name.as_str(), ".DS_Store" | "desktop.ini" | "Thumbs.db") {
+            // 系统杂项静默跳过
+        } else {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if matches!(ext.as_str(), "md" | "markdown") {
+                let text = std::fs::read_to_string(&path).map_err(|e| format!("{rel}: {e}"))?;
+                md_out.push((rel, text));
+            } else if let Some(kind) = asset_kind_of(&ext) {
+                let bytes = std::fs::read(&path).map_err(|e| format!("{rel}: {e}"))?;
+                let _ = kind;
+                asset_out.push((rel, bytes, ext));
+            } else {
+                warnings.push(format!("跳过不支持的文件：{rel}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// LLM 用量汇总（FR-MODEL-05）：设置页仪表盘数据。
+#[tauri::command]
+pub fn get_usage_summary(
+    sqlite: State<'_, Arc<SqliteIndex>>,
+) -> Result<Vec<lmnotes_core::index::sqlite::UsageRow>, String> {
+    sqlite.usage_summary().map_err(|e| e.to_string())
+}
+
+// ============ 每日/每周回顾（FR-LLM-07，v0.8）============
+
+/// 回顾 digest 构建（纯函数）：标题 + 正文开头（截断）聚合。
+fn build_review_digest(entries: &[(String, String)]) -> String {
+    let mut out = String::new();
+    for (title, head) in entries {
+        out.push_str(&format!("### {title}\n{}\n\n", head.trim()));
+    }
+    out
+}
+
+/// 回顾笔记内容构建（纯函数）：frontmatter + LLM 输出 + 来源笔记链接表。
+fn build_review_content(
+    answer: &str,
+    sources: &[(String, String)], // (title, vault 相对路径)
+    title: &str,
+    id: &str,
+    ts: &str,
+) -> String {
+    let links: String = sources
+        .iter()
+        .map(|(t, p)| format!("- [{t}](</{p}>)\n"))
+        .collect();
+    format!(
+        "---\ntype: note\nid: {id}\ntitle: {title}\ntags: [review]\ncreated: {ts}\n---\n\n# {title}\n\n{answer}\n\n---\n\n## 来源笔记（{n} 篇）\n\n{links}",
+        id = id,
+        title = title,
+        ts = ts,
+        answer = answer.trim(),
+        n = sources.len(),
+        links = links
+    )
+}
+
+/// 每日/每周回顾（FR-LLM-07）：聚合近 N 天修改的笔记（标题+正文开头）→
+/// 复用 Summarize 路由 + ADR-0005 护栏（用户主动触发，同 rewrite 不读
+/// local_only，仍受 cloud_allowed/敏感词约束）→ 产物写入 notes/reviews/。
+#[tauri::command]
+pub async fn generate_review(
+    range: String, // daily | weekly
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    indexer: State<'_, Arc<Indexer>>,
+) -> Result<String, String> {
+    let days: i64 = match range.as_str() {
+        "daily" => 1,
+        "weekly" => 7,
+        _ => return Err(format!("unknown range: {range}")),
+    };
+    let since = chrono::Utc::now().timestamp() - days * 86400;
+    let rows = sqlite
+        .list_timeline(500)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|r| r.mtime >= since && !r.path.starts_with("notes/reviews/"))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return Err("该时间范围内没有笔记，无法生成回顾".into());
+    }
+
+    // 标题 + 正文开头（每篇 200 字，上限 30 篇——控制上下文与隐私面）
+    let root = vault_root();
+    let mut entries = Vec::with_capacity(rows.len().min(30));
+    for r in rows.iter().take(30) {
+        let title = r.title.clone().unwrap_or_else(|| r.path.clone());
+        let body_head = tokio::fs::read_to_string(root.join(&r.path))
+            .await
+            .ok()
+            .map(|t| {
+                t.split_once("---\n\n")
+                    .map(|(_, b)| b.to_string())
+                    .unwrap_or(t)
+            })
+            .unwrap_or_default();
+        let head: String = body_head.chars().take(200).collect();
+        entries.push((title, head));
+    }
+    let digest = build_review_digest(&entries);
+
+    let (chat, model) = registry
+        .chat_for(&routing, Task::Summarize)
+        .map_err(|e| e.to_string())?;
+    match check(&guard_cfg, chat.kind(), &digest, false) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let period = if days == 1 { "今日" } else { "最近一周" };
+    let req = ChatRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: ChatRole::User,
+            content: format!(
+                "以下是我{period}（截至 {today}）修改过的笔记摘要。请生成一份结构化回顾，包含：主要主题、关键进展、值得跟进的点。用中文 Markdown 输出，不要复述原文。\n\n{digest}"
+            ),
+        }],
+        temperature: Some(0.4),
+    };
+    let answer = chat.chat(req).await.map_err(|e| e.to_string())?;
+
+    let sources: Vec<(String, String)> = rows
+        .iter()
+        .take(30)
+        .map(|r| {
+            (
+                r.title.clone().unwrap_or_else(|| r.path.clone()),
+                r.path.clone(),
+            )
+        })
+        .collect();
+    let rel = if days == 1 {
+        format!("notes/reviews/review-{today}.md")
+    } else {
+        format!("notes/reviews/review-week-{today}.md")
+    };
+    let id = lmnotes_core::id::new_note_id(chrono::Utc::now().naive_utc());
+    let ts = chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S+00:00")
+        .to_string();
+    let title = format!("{period}回顾 {today}");
+    let content = build_review_content(&answer, &sources, &title, &id, &ts);
+    let full = root.join(&rel);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
+    let backend = lmnotes_core::backend::fs::FsBackend::new(root.clone());
+    let _ = lmnotes_core::indexer::walk_and_index(&indexer, &backend, &root).await;
+    Ok(rel)
+}
+
+/// 导入报告（dry-run 与执行共用；executed 区分）。
+#[derive(serde::Serialize)]
+pub struct ImportReport {
+    pub notes: usize,
+    pub assets: usize,
+    pub links_resolved: usize,
+    pub links_unresolved: usize,
+    pub warnings: Vec<String>,
+    pub executed: bool,
+    /// 笔记落位根（如 notes/import-20260905），供前端打开/提示。
+    pub dest_root: String,
+}
+
+/// 从 Obsidian/Foam/纯 md 目录导入（FR-STORE-06）。
+/// dry_run=true 只规划不落盘（前端先展示报告，再确认执行）。
+/// 内存内两阶段：plan_import 完成全部转换后统一写。
+#[tauri::command]
+pub async fn import_vault(
+    src_dir: String,
+    dry_run: bool,
+    indexer: State<'_, Arc<Indexer>>,
+) -> Result<ImportReport, String> {
+    use lmnotes_core::import::{plan_import, AssetDest, ImportOptions, SourceMd};
+
+    let src_root = PathBuf::from(&src_dir);
+    if !src_root.is_dir() {
+        return Err(format!("不是目录：{src_dir}"));
+    }
+
+    let mut md_files = Vec::new();
+    let mut asset_files = Vec::new();
+    let mut warnings = Vec::new();
+    scan_source_dir(
+        &src_root,
+        "",
+        &mut md_files,
+        &mut asset_files,
+        &mut warnings,
+    )?;
+    if md_files.is_empty() && asset_files.is_empty() {
+        return Err("目录中没有可导入的 Markdown 或资源文件".into());
+    }
+
+    // 资源路径规划（dry-run 与执行一致——链接重写依赖这些路径）
+    let asset_dests: Vec<AssetDest> = asset_files
+        .iter()
+        .map(|(rel, bytes, ext)| {
+            let kind = asset_kind_of(ext).unwrap_or("img");
+            let (dest, _) = archive_plan(bytes, ext, kind);
+            AssetDest {
+                src_rel: rel.clone(),
+                dest,
+            }
+        })
+        .collect();
+
+    let date = chrono::Utc::now().format("%Y%m%d").to_string();
+    let dest_root = format!("notes/import-{date}");
+    let plan = plan_import(
+        md_files
+            .into_iter()
+            .map(|(rel, text)| SourceMd { rel, text })
+            .collect(),
+        asset_dests,
+        &ImportOptions {
+            dest_root: dest_root.clone(),
+        },
+    );
+    let mut all_warnings = warnings;
+    all_warnings.extend(plan.warnings);
+
+    if dry_run {
+        return Ok(ImportReport {
+            notes: plan.notes.len(),
+            assets: asset_files.len(),
+            links_resolved: plan.stats.resolved,
+            links_unresolved: plan.stats.unresolved,
+            warnings: all_warnings,
+            executed: false,
+            dest_root,
+        });
+    }
+
+    // 执行：资源归档（去重幂等）→ 笔记落盘 → 增量重扫入索引
+    for (_, bytes, ext) in &asset_files {
+        let kind = asset_kind_of(ext).unwrap_or("img");
+        archive_binary(bytes, ext, kind).await?;
+    }
+    let root = vault_root();
+    for note in &plan.notes {
+        let full = root.join(&note.dest);
+        if let Some(p) = full.parent() {
+            tokio::fs::create_dir_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&full, &note.content)
+            .await
+            .map_err(|e| format!("{}: {e}", note.dest))?;
+    }
+    let backend = lmnotes_core::backend::fs::FsBackend::new(root.clone());
+    let _ = lmnotes_core::indexer::walk_and_index(&indexer, &backend, &root).await;
+
+    Ok(ImportReport {
+        notes: plan.notes.len(),
+        assets: asset_files.len(),
+        links_resolved: plan.stats.resolved,
+        links_unresolved: plan.stats.unresolved,
+        warnings: all_warnings,
+        executed: true,
+        dest_root,
+    })
+}
+
 /// 插入图片：按 SHA-256 哈希存 assets/img/<前2位>/<hash>.<ext>（去重）。
 /// 返回 bundle-relative 路径（带前导 /），供前端插入 markdown 图片链接。
 #[tauri::command]
@@ -190,13 +600,21 @@ pub async fn insert_image(data: Vec<u8>, ext: String) -> Result<String, String> 
 /// 二进制归档：按 SHA-256 哈希存 assets/<kind>/<前2位>/<hash>.<ext>（去重）。
 /// kind ∈ {img, audio}。返回 (bundle-relative 路径带前导 /, hex 哈希)。
 /// insert_image（图片）与 insert_audio / create_voice_note（音频）共用。
-async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, String), String> {
+/// 归档路径规划（纯计算，不落盘）：sha256 → `assets/<kind>/<前2位>/<hash>.<ext>`。
+/// v0.8 导入 dry-run 需要与执行一致的资源路径（链接重写依赖），抽出与
+/// archive_binary 共用。
+fn archive_plan(data: &[u8], ext: &str, kind: &str) -> (String, String) {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(data);
     let hash = hex::encode(h.finalize());
     let prefix = &hash[..2];
     let rel = format!("assets/{kind}/{prefix}/{hash}.{ext}");
+    (format!("/{rel}"), hash)
+}
+
+async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, String), String> {
+    let (rel, hash) = archive_plan(data, ext, kind);
     let full = vault_root().join(&rel);
     if !full.exists() {
         if let Some(p) = full.parent() {
@@ -208,7 +626,7 @@ async fn archive_binary(data: &[u8], ext: &str, kind: &str) -> Result<(String, S
             .await
             .map_err(|e| e.to_string())?;
     }
-    Ok((format!("/{rel}"), hash))
+    Ok((rel, hash))
 }
 
 /// 插入音频：存 assets/audio/<前2位>/<hash>.<ext>（去重），返回带前导 / 的相对路径。
@@ -2618,10 +3036,107 @@ async fn send_download_get(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_extract_audio_cmd, builtin_whisper_models, download_urls, media_kind_dir,
-        parse_snapshot_ts, pick_preferred_model, render_template_placeholders,
+        asset_kind_of, build_extract_audio_cmd, build_review_content, build_review_digest,
+        builtin_whisper_models, daily_header, daily_note_rel, download_urls, media_kind_dir,
+        parse_snapshot_ts, pick_preferred_model, render_template_placeholders, scan_source_dir,
+        TimelineEntry,
     };
     use chrono::TimeZone;
+    use lmnotes_core::index::schema::ConceptRow;
+
+    #[test]
+    fn daily_note_rel_and_header_shape() {
+        // v0.7 FR-SEARCH-05：daily 路径固定；frontmatter 必须含 type: daily（OKF 约定值）。
+        assert_eq!(daily_note_rel("2026-09-04"), "notes/daily/2026-09-04.md");
+        let h = daily_header("2026-09-04", "nt_test");
+        assert!(h.starts_with("---\ntype: daily\n"));
+        assert!(h.contains("id: nt_test\n"));
+        assert!(h.contains("title: 2026-09-04\n"));
+        assert!(h.trim_end().ends_with("# 2026-09-04"));
+    }
+
+    #[test]
+    fn timeline_entry_maps_row_fields() {
+        let row = ConceptRow {
+            id: "nt_x".into(),
+            path: "notes/x.md".into(),
+            type_: "daily".into(),
+            title: None,
+            mtime: 42,
+            content_hash: "h".into(),
+            aliases: vec![],
+            tags: vec!["t".into()],
+        };
+        let e = TimelineEntry::from(row);
+        assert_eq!(e.path, "notes/x.md");
+        assert_eq!(e.type_, "daily");
+        assert_eq!(e.mtime, 42);
+        assert!(e.title.is_none());
+    }
+
+    #[test]
+    fn scan_source_dir_classifies_and_excludes() {
+        // v0.8 FR-STORE-06：md/资源分类入列；.obsidian、.git、系统杂项静默排除；
+        // 不识别扩展告警（不丢信息）。
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("ideas")).unwrap();
+        std::fs::create_dir_all(root.join(".obsidian")).unwrap();
+        std::fs::write(
+            root.join("ideas/note one.md"),
+            "---\ntitle: A\n---\n\n[[b]]",
+        )
+        .unwrap();
+        std::fs::write(root.join("ideas/pic.png"), b"pngbytes").unwrap();
+        std::fs::write(root.join(".obsidian/app.json"), b"{}").unwrap();
+        std::fs::write(root.join("Thumbs.db"), b"x").unwrap();
+        std::fs::write(root.join("data.pdf"), b"%PDF").unwrap();
+        let mut md = vec![];
+        let mut assets = vec![];
+        let mut warns = vec![];
+        scan_source_dir(root, "", &mut md, &mut assets, &mut warns).unwrap();
+        assert_eq!(md.len(), 1, "{md:?}");
+        assert_eq!(md[0].0, "ideas/note one.md");
+        assert_eq!(assets.len(), 1, "{assets:?}");
+        assert_eq!(assets[0].0, "ideas/pic.png");
+        assert!(warns.iter().any(|w| w.contains("data.pdf")), "{warns:?}");
+        assert!(
+            !warns
+                .iter()
+                .any(|w| w.contains(".obsidian") || w.contains("Thumbs")),
+            "{warns:?}"
+        );
+    }
+
+    #[test]
+    fn asset_kind_mapping_covers_media_families() {
+        assert_eq!(asset_kind_of("png"), Some("img"));
+        assert_eq!(asset_kind_of("svg"), Some("img"));
+        assert_eq!(asset_kind_of("m4a"), Some("audio"));
+        assert_eq!(asset_kind_of("webm"), Some("video"));
+        assert_eq!(asset_kind_of("pdf"), None);
+    }
+
+    #[test]
+    fn review_digest_and_content_format() {
+        // v0.8 FR-LLM-07：digest 聚合条目；产物含 review 标签 + 来源 OKF 链接。
+        let digest =
+            build_review_digest(&[("A".into(), " 内容 ".into()), ("B".into(), "x".into())]);
+        assert!(digest.contains("### A\n内容\n\n### B\nx"), "{digest}");
+
+        let content = build_review_content(
+            "回顾正文",
+            &[("A".into(), "notes/a.md".into())],
+            "今日回顾 2026-09-05",
+            "nt_r",
+            "2026-09-05T10:00:00+00:00",
+        );
+        assert!(content.starts_with("---\ntype: note\n"), "{content}");
+        assert!(content.contains("tags: [review]"));
+        assert!(content.contains("# 今日回顾 2026-09-05"));
+        assert!(content.contains("[A](</notes/a.md>)"), "{content}");
+        assert!(content.contains("来源笔记（1 篇）"));
+    }
 
     #[test]
     fn builtin_models_use_ggerganov_repo() {

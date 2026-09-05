@@ -1,8 +1,9 @@
 import { createSignal, For, Show, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 import { t, locale, setLocale } from "../i18n";
 import { LocalSttSetup } from "../voice/LocalSttSetup";
-import { save as saveDialog, message } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog, message, ask } from "@tauri-apps/plugin-dialog";
 import { APP_NAME } from "../components/PromptDialog";
 import { VaultSection } from "./VaultSection";
 
@@ -44,6 +45,7 @@ interface Config {
   };
   guard: { cloud_allowed: boolean; sensitive_patterns: string[] };
   media: { background_threshold_ms: number };
+  capture: { hotkey: string };
 }
 
 interface ProviderHealth {
@@ -51,10 +53,89 @@ interface ProviderHealth {
   healthy: boolean;
 }
 
+/** 用量汇总行（get_usage_summary 命令返回）。 */
+interface UsageRow {
+  provider: string;
+  kind: string;
+  local: boolean;
+  calls: number;
+  tokens: number;
+  last_ts: number;
+}
+
+/** 导入报告（import_vault 命令返回）。 */
+interface ImportReport {
+  notes: number;
+  assets: number;
+  links_resolved: number;
+  links_unresolved: number;
+  warnings: string[];
+  executed: boolean;
+  dest_root: string;
+}
+
 export function ProviderSettings(props: { onClose: () => void }) {
   const [config, setConfig] = createSignal<Config | null>(null);
   const [health, setHealth] = createSignal<ProviderHealth[]>([]);
   const [saving, setSaving] = createSignal(false);
+  const [importing, setImporting] = createSignal(false);
+  const [usage, setUsage] = createSignal<UsageRow[]>([]);
+
+  const refreshUsage = async () => {
+    try {
+      setUsage(await invoke<UsageRow[]>("get_usage_summary"));
+    } catch {
+      setUsage([]);
+    }
+  };
+
+  // 库导入（FR-STORE-06，v0.8）：选目录 → dry-run 报告确认 → 执行 → 刷新主窗口。
+  const doImport = async () => {
+    if (importing()) return;
+    const picked = await openDialog({
+      directory: true,
+      multiple: false,
+      title: t("import.pickDir"),
+    });
+    if (!picked || typeof picked !== "string") return;
+    setImporting(true);
+    try {
+      const dry = await invoke<ImportReport>("import_vault", {
+        srcDir: picked,
+        dryRun: true,
+      });
+      const warnLines = dry.warnings.length
+        ? "\n" + t("import.warnPrefix") + "\n" + dry.warnings.slice(0, 5).join("\n")
+        : "";
+      const ok = await ask(
+        t("import.confirm", {
+          n: dry.notes,
+          a: dry.assets,
+          r: dry.links_resolved,
+          u: dry.links_unresolved,
+        }) + warnLines,
+        { title: APP_NAME },
+      );
+      if (!ok) return;
+      const rep = await invoke<ImportReport>("import_vault", {
+        srcDir: picked,
+        dryRun: false,
+      });
+      void message(
+        t("import.done", { n: rep.notes, a: rep.assets, d: rep.dest_root }),
+        { title: APP_NAME },
+      );
+      try {
+        await emit("vault-changed");
+      } catch {
+        /* 主窗口刷新失败不影响导入结果 */
+      }
+    } catch (e) {
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    } finally {
+      setImporting(false);
+    }
+  };
 
   onMount(async () => {
     try {
@@ -65,6 +146,7 @@ export function ProviderSettings(props: { onClose: () => void }) {
     } catch (e) {
       console.error("load config", e);
     }
+    void refreshUsage();
   });
 
   const save = async () => {
@@ -345,6 +427,22 @@ export function ProviderSettings(props: { onClose: () => void }) {
               <LocalSttSetup />
 
               <div class="data-section">
+                <h3>{t("hotkey.title")}</h3>
+                <input
+                  type="text"
+                  style={{ width: "220px" }}
+                  value={cfg().capture?.hotkey ?? "CmdOrCtrl+Shift+L"}
+                  onInput={(e) =>
+                    setConfig({
+                      ...cfg(),
+                      capture: { hotkey: e.currentTarget.value },
+                    })
+                  }
+                />
+                <p class="muted small">{t("hotkey.hint")}</p>
+              </div>
+
+              <div class="data-section">
                 <h3>{t("data.title")}</h3>
                 <div class="settings-actions" style={{ "justify-content": "flex-start" }}>
                   <button
@@ -381,6 +479,50 @@ export function ProviderSettings(props: { onClose: () => void }) {
                   </button>
                 </div>
                 <p class="muted small">{t("data.hint")}</p>
+              </div>
+
+              <div class="data-section">
+                <h3>{t("import.title")}</h3>
+                <div class="settings-actions" style={{ "justify-content": "flex-start" }}>
+                  <button class="btn-secondary" onClick={() => void doImport()} disabled={importing()}>
+                    {importing() ? t("import.running") : t("import.pickBtn")}
+                  </button>
+                </div>
+                <p class="muted small">{t("import.hint")}</p>
+              </div>
+
+              <div class="data-section">
+                <h3>{t("usage.title")}</h3>
+                <Show
+                  when={usage().length > 0}
+                  fallback={<p class="muted small">{t("usage.empty")}</p>}
+                >
+                  <table class="usage-table">
+                    <thead>
+                      <tr>
+                        <th>{t("usage.colProvider")}</th>
+                        <th>{t("usage.colKind")}</th>
+                        <th>{t("usage.colScope")}</th>
+                        <th>{t("usage.colCalls")}</th>
+                        <th>{t("usage.colTokens")}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <For each={usage()}>
+                        {(row) => (
+                          <tr>
+                            <td>{row.provider}</td>
+                            <td>{row.kind}</td>
+                            <td>{row.local ? t("usage.local") : t("usage.cloud")}</td>
+                            <td>{row.calls}</td>
+                            <td>≈{row.tokens}</td>
+                          </tr>
+                        )}
+                      </For>
+                    </tbody>
+                  </table>
+                  <p class="muted small">{t("usage.hint")}</p>
+                </Show>
               </div>
 
               <div class="settings-actions">

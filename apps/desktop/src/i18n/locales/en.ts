@@ -207,6 +207,71 @@ export const en = {
   "graph.semanticEdge": "Semantic neighbor",
   "graph.nodes": "nodes",
   "graph.edges": "edges",
+
+  // ── Command palette (FR-SEARCH-01, v0.7) ─────────────────────────────
+  "palette.placeholder": "Search notes or run a command…",
+  "palette.sectionCommands": "Commands",
+  "palette.sectionRecent": "Recently opened",
+  "palette.sectionNotes": "Notes",
+  "palette.noResults": "No matches",
+  "palette.newNote": "New note",
+  "palette.quickCapture": "Quick capture",
+  "palette.voice": "Voice input",
+  "palette.chat": "Chat with Vault",
+  "palette.graph": "Knowledge graph",
+  "palette.timeline": "Timeline",
+  "palette.daily": "Today's daily note",
+  "palette.dailyReview": "Daily review (generate)",
+  "palette.weeklyReview": "Weekly review (generate)",
+  "palette.settings": "Settings",
+  "palette.tasks": "Media task center",
+
+  // ── Timeline / daily note / tags (FR-SEARCH-05, v0.7) ────────────────
+  "app.dailyBtn": "📅 Today",
+  "app.dailyTooltip": "Open or create today's daily note",
+  "app.timelineBtn": "🕘 Timeline",
+  "timeline.title": "🕘 Timeline (recent changes)",
+  "timeline.titleTagPrefix": "Tag: ",
+  "timeline.today": "Today",
+  "timeline.yesterday": "Yesterday",
+  "timeline.empty": "No notes yet",
+  "tags.section": "Tags",
+  "tags.empty": "No tags yet",
+
+  // ── Quick capture mini window (FR-CAP-01, v0.7) ───────────────────────
+  "quickCapture.placeholder": "Capture a thought… (Ctrl+Enter to save)",
+  "quickCapture.saved": "Saved to today's note ✓",
+  "quickCapture.hint": "Ctrl+Enter save · Esc hide",
+
+  // ── Vault import (FR-STORE-06, v0.8) ─────────────────────────────────
+  "import.title": "📥 Import external vault",
+  "import.hint": "Import from an Obsidian/Foam/plain-Markdown folder: wikilinks become OKF links, images/audio/video are archived with dedup. Preview first, then confirm.",
+  "import.pickBtn": "Choose folder…",
+  "import.pickDir": "Choose the folder to import",
+  "import.confirm":
+    "About to import {n} note(s) and {a} asset(s).\nLinks: {r} resolved, {u} unresolved (kept verbatim).\n\nProceed?",
+  "import.warnPrefix": "Warnings:",
+  "import.running": "Importing…",
+  "import.done": "Imported {n} note(s) and {a} asset(s) into {d}.",
+
+  // ── LLM usage (FR-MODEL-05, v0.8) ─────────────────────────────────────
+  "usage.title": "📊 LLM usage",
+  "usage.empty": "No LLM calls recorded yet.",
+  "usage.colProvider": "Provider",
+  "usage.colKind": "Task",
+  "usage.colScope": "Scope",
+  "usage.colCalls": "Calls",
+  "usage.colTokens": "Tokens (est.)",
+  "usage.local": "Local",
+  "usage.cloud": "Cloud",
+  "usage.hint": "Privacy: only provider/task/local-vs-cloud and estimated tokens are recorded — never content.",
+
+  // ── Review (FR-LLM-07, v0.8) ──────────────────────────────────────────
+  "review.generating": "⏳ Generating review (LLM)…",
+
+  // ── Global hotkey (v0.8) ──────────────────────────────────────────────
+  "hotkey.title": "⚡ Global hotkey (quick capture)",
+  "hotkey.hint": "Tauri accelerator syntax, e.g. CmdOrCtrl+Shift+L. Takes effect after restart.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -29,6 +29,11 @@ const [tasks, setTasks] = createSignal<MediaTaskDto[]>([]);
 let unlisten: UnlistenFn | null = null;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 
+/** 程序化打开任务中心（v0.7 命令面板入口）。 */
+export function openMediaTasks() {
+  setOpen(true);
+}
+
 async function refresh() {
   try {
     setTasks(await invoke<MediaTaskDto[]>("list_media_tasks", { status: null }));

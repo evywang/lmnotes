@@ -206,4 +206,69 @@ export const zh: Record<MessageKey, string> = {
   "graph.semanticEdge": "语义近邻",
   "graph.nodes": "节点",
   "graph.edges": "边",
+
+  // ── 命令面板（FR-SEARCH-01，v0.7）─────────────────────────────────────
+  "palette.placeholder": "搜索笔记或执行命令…",
+  "palette.sectionCommands": "命令",
+  "palette.sectionRecent": "最近打开",
+  "palette.sectionNotes": "笔记",
+  "palette.noResults": "无匹配结果",
+  "palette.newNote": "新建笔记",
+  "palette.quickCapture": "快速捕获",
+  "palette.voice": "语音输入",
+  "palette.chat": "Chat with Vault",
+  "palette.graph": "知识图谱",
+  "palette.timeline": "时间线",
+  "palette.daily": "今日笔记",
+  "palette.dailyReview": "每日回顾（生成）",
+  "palette.weeklyReview": "每周回顾（生成）",
+  "palette.settings": "设置",
+  "palette.tasks": "媒体任务中心",
+
+  // ── 时间线 / 每日笔记 / 标签（FR-SEARCH-05，v0.7）────────────────────
+  "app.dailyBtn": "📅 今日",
+  "app.dailyTooltip": "打开或创建今日 daily note",
+  "app.timelineBtn": "🕘 时间线",
+  "timeline.title": "🕘 时间线（最近变更）",
+  "timeline.titleTagPrefix": "标签：",
+  "timeline.today": "今天",
+  "timeline.yesterday": "昨天",
+  "timeline.empty": "暂无笔记",
+  "tags.section": "标签",
+  "tags.empty": "暂无标签",
+
+  // ── 快速捕获浮窗（FR-CAP-01，v0.7）───────────────────────────────────
+  "quickCapture.placeholder": "随手记一笔…（Ctrl+Enter 保存）",
+  "quickCapture.saved": "已存入今日笔记 ✓",
+  "quickCapture.hint": "Ctrl+Enter 保存 · Esc 隐藏",
+
+  // ── 库导入（FR-STORE-06，v0.8）───────────────────────────────────────
+  "import.title": "📥 导入外部库",
+  "import.hint": "从 Obsidian/Foam/纯 Markdown 目录导入：wikilink 自动转 OKF 链接，图片/音视频归档去重；先预览报告再确认执行。",
+  "import.pickBtn": "选择目录…",
+  "import.pickDir": "选择要导入的库目录",
+  "import.confirm":
+    "将导入 {n} 篇笔记、{a} 个资源。\n链接解析：{r} 成功 / {u} 未解析（未解析的保留原文）。\n\n确认执行？",
+  "import.warnPrefix": "警告：",
+  "import.running": "导入中…",
+  "import.done": "已导入 {n} 篇笔记、{a} 个资源（位于 {d}）。",
+
+  // ── LLM 用量（FR-MODEL-05，v0.8）──────────────────────────────────────
+  "usage.title": "📊 LLM 用量",
+  "usage.empty": "尚无 LLM 调用记录。",
+  "usage.colProvider": "Provider",
+  "usage.colKind": "任务",
+  "usage.colScope": "范围",
+  "usage.colCalls": "次数",
+  "usage.colTokens": "Token（估算）",
+  "usage.local": "本地",
+  "usage.cloud": "云端",
+  "usage.hint": "隐私：只记录 provider/任务/本地或云端/估算 token，不记录任何内容。",
+
+  // ── 回顾（FR-LLM-07，v0.8）────────────────────────────────────────────
+  "review.generating": "⏳ 回顾生成中…（LLM）",
+
+  // ── 全局热键（v0.8）───────────────────────────────────────────────────
+  "hotkey.title": "⚡ 全局热键（快速捕获浮窗）",
+  "hotkey.hint": "Tauri accelerator 语法，如 CmdOrCtrl+Shift+L；保存后重启应用生效。",
 };
