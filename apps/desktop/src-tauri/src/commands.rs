@@ -40,6 +40,99 @@ pub fn search(
         .map_err(|e| e.to_string())
 }
 
+// ============ 语义混合搜索（v0.9 搜索与常驻）============
+
+/// 混合搜索命中（侧栏语义搜索 FR-SEARCH-02 补全）。
+#[derive(serde::Serialize)]
+pub struct HybridHit {
+    pub path: String,
+    pub title: Option<String>,
+    pub score: f64,
+    /// 命中词附近截取的正文片段（纯文本，前端高亮）。
+    pub snippet: Option<String>,
+    /// "keyword" | "semantic" | "keyword+semantic"
+    pub sources: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct HybridSearchResponse {
+    pub hits: Vec<HybridHit>,
+    /// 本次是否成功走了向量召回（false = embed 失败/未配置，纯 BM25 降级）。
+    pub semantic: bool,
+}
+
+/// 混合搜索：BM25 + 向量 KNN → RRF 融合（k=60）→ 元数据富化 + 片段。
+/// embed 3s 超时，失败/无路由静默降级纯 BM25（不阻塞侧栏）。
+#[tauri::command]
+pub async fn search_hybrid(
+    query: String,
+    limit: Option<usize>,
+    engine: State<'_, Arc<SearchEngine>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+) -> Result<HybridSearchResponse, String> {
+    use lmnotes_core::search::hybrid_fuse;
+
+    let limit = limit.unwrap_or(20).clamp(1, 50);
+    let bm25 = engine.search(&query, limit).map_err(|e| e.to_string())?;
+
+    // 向量召回（可失败，降级）
+    let mut semantic = false;
+    let mut vector_ids: Vec<String> = Vec::new();
+    if let Ok((embedder, model)) = registry.embed_for(&routing, Task::Embed) {
+        let embedded = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            embedder.embed(&model, std::slice::from_ref(&query)),
+        )
+        .await;
+        if let Ok(Ok(vectors)) = embedded {
+            if let Some(qvec) = vectors.into_iter().next() {
+                match sqlite.vector_search(&qvec, limit) {
+                    Ok(hits) => {
+                        vector_ids = hits.into_iter().map(|(id, _)| id).collect();
+                        semantic = true;
+                    }
+                    Err(e) => eprintln!("[search_hybrid] vector_search fail: {e}"),
+                }
+            }
+        } else {
+            eprintln!("[search_hybrid] embed timeout/fail — fallback to BM25");
+        }
+    }
+
+    let fused = hybrid_fuse(&bm25, &vector_ids, limit);
+    let root = vault_root();
+    let mut out = Vec::with_capacity(fused.len());
+    for f in fused {
+        let Some(row) = sqlite.get_concept(&f.id).map_err(|e| e.to_string())? else {
+            continue;
+        };
+        let sources = match (f.in_bm25, f.in_vector) {
+            (true, true) => "keyword+semantic",
+            (false, true) => "semantic",
+            (true, false) => "keyword",
+            (false, false) => unreachable!(),
+        };
+        let snippet = tokio::fs::read_to_string(root.join(&row.path))
+            .await
+            .ok()
+            .and_then(|text| {
+                let body = text.split_once("\n---\n\n").map(|(_, b)| b).unwrap_or(&text);
+                let s = lmnotes_core::search::make_snippet(body, &query, 160);
+                (!s.is_empty()).then_some(s)
+            });
+        out.push(HybridHit {
+            path: row.path,
+            title: row.title,
+            score: f.score,
+            snippet,
+            sources: sources.to_string(),
+        });
+    }
+    Ok(HybridSearchResponse { hits: out, semantic })
+}
+
 /// 双链补全候选（FR-CAP-03）：title/alias/path 子串匹配，title 命中优先。
 /// 数据源 all_concepts（内存过滤，ms 级），query 空返回前 limit 条。
 #[tauri::command]

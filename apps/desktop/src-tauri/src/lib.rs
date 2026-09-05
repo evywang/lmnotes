@@ -322,6 +322,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::search,
+            commands::search_hybrid,
             commands::list_note_titles,
             commands::list_snapshots,
             commands::read_snapshot,
