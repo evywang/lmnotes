@@ -220,6 +220,8 @@ export const zh: Record<MessageKey, string> = {
   "palette.graph": "知识图谱",
   "palette.timeline": "时间线",
   "palette.daily": "今日笔记",
+  "palette.dailyReview": "每日回顾（生成）",
+  "palette.weeklyReview": "每周回顾（生成）",
   "palette.settings": "设置",
   "palette.tasks": "媒体任务中心",
 
@@ -262,4 +264,7 @@ export const zh: Record<MessageKey, string> = {
   "usage.local": "本地",
   "usage.cloud": "云端",
   "usage.hint": "隐私：只记录 provider/任务/本地或云端/估算 token，不记录任何内容。",
+
+  // ── 回顾（FR-LLM-07，v0.8）────────────────────────────────────────────
+  "review.generating": "⏳ 回顾生成中…（LLM）",
 };

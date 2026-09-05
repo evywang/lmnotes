@@ -221,6 +221,8 @@ export const en = {
   "palette.graph": "Knowledge graph",
   "palette.timeline": "Timeline",
   "palette.daily": "Today's daily note",
+  "palette.dailyReview": "Daily review (generate)",
+  "palette.weeklyReview": "Weekly review (generate)",
   "palette.settings": "Settings",
   "palette.tasks": "Media task center",
 
@@ -263,6 +265,9 @@ export const en = {
   "usage.local": "Local",
   "usage.cloud": "Cloud",
   "usage.hint": "Privacy: only provider/task/local-vs-cloud and estimated tokens are recorded — never content.",
+
+  // ── Review (FR-LLM-07, v0.8) ──────────────────────────────────────────
+  "review.generating": "⏳ Generating review (LLM)…",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

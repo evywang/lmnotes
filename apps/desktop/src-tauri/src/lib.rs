@@ -359,6 +359,7 @@ pub fn run() {
             commands::list_notes_with_tag,
             commands::import_vault,
             commands::get_usage_summary,
+            commands::generate_review,
             commands::import_note,
             commands::import_document,
             commands::list_tree,

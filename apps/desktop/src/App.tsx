@@ -1,7 +1,7 @@
 import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, message as dialogMessage } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
@@ -48,6 +48,7 @@ export function App() {
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [timelineOpen, setTimelineOpen] = createSignal(false);
   const [tagFilter, setTagFilter] = createSignal<string | null>(null);
+  const [reviewBusy, setReviewBusy] = createSignal(false);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
   const [treeOpen, setTreeOpen] = createSignal(false);
 
@@ -176,6 +177,23 @@ export function App() {
     setTimelineOpen(true);
   };
 
+  // 每日/每周回顾（FR-LLM-07，v0.8）：LLM 生成耗时，侧栏显示进行中提示。
+  const generateReview = async (range: "daily" | "weekly") => {
+    if (reviewBusy()) return;
+    setReviewBusy(true);
+    try {
+      const path = await invoke<string>("generate_review", { range });
+      setActivePath(path);
+      setTreeRefresh((n) => n + 1);
+      runSearch("");
+    } catch (e) {
+      console.error("generate review", e);
+      void dialogMessage(String(e), { title: "LMNotes", kind: "error" });
+    } finally {
+      setReviewBusy(false);
+    }
+  };
+
   // 命令面板动作表（FR-SEARCH-01）：标签走 i18n，执行闭包复用既有入口。
   const paletteActions = (): PaletteAction[] => [
     { id: "new-note", icon: "📝", label: t("palette.newNote"), run: () => void createNote() },
@@ -185,6 +203,8 @@ export function App() {
     { id: "graph", icon: "🕸", label: t("palette.graph"), run: () => setGraphOpen(true) },
     { id: "timeline", icon: "🕘", label: t("palette.timeline"), run: () => openTimeline(null) },
     { id: "daily", icon: "📅", label: t("palette.daily"), run: () => void openDaily() },
+    { id: "daily-review", icon: "🗓", label: t("palette.dailyReview"), run: () => void generateReview("daily") },
+    { id: "weekly-review", icon: "📆", label: t("palette.weeklyReview"), run: () => void generateReview("weekly") },
     { id: "tasks", icon: "⏳", label: t("palette.tasks"), run: () => openMediaTasks() },
     { id: "settings", icon: "⚙", label: t("palette.settings"), run: () => setSettingsOpen(true) },
   ];
@@ -230,6 +250,9 @@ export function App() {
             {t("app.timelineBtn")}
           </button>
           <TagCloud onPick={(tag) => openTimeline(tag)} />
+          <Show when={reviewBusy()}>
+            <p class="muted small">{t("review.generating")}</p>
+          </Show>
           <Show when={searching()}>
             <p class="muted">{t("app.searching")}</p>
           </Show>

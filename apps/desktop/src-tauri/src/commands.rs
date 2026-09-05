@@ -338,6 +338,136 @@ pub fn get_usage_summary(
     sqlite.usage_summary().map_err(|e| e.to_string())
 }
 
+// ============ 每日/每周回顾（FR-LLM-07，v0.8）============
+
+/// 回顾 digest 构建（纯函数）：标题 + 正文开头（截断）聚合。
+fn build_review_digest(entries: &[(String, String)]) -> String {
+    let mut out = String::new();
+    for (title, head) in entries {
+        out.push_str(&format!("### {title}\n{}\n\n", head.trim()));
+    }
+    out
+}
+
+/// 回顾笔记内容构建（纯函数）：frontmatter + LLM 输出 + 来源笔记链接表。
+fn build_review_content(
+    answer: &str,
+    sources: &[(String, String)], // (title, vault 相对路径)
+    title: &str,
+    id: &str,
+    ts: &str,
+) -> String {
+    let links: String = sources
+        .iter()
+        .map(|(t, p)| format!("- [{t}](</{p}>)\n"))
+        .collect();
+    format!(
+        "---\ntype: note\nid: {id}\ntitle: {title}\ntags: [review]\ncreated: {ts}\n---\n\n# {title}\n\n{answer}\n\n---\n\n## 来源笔记（{n} 篇）\n\n{links}",
+        id = id,
+        title = title,
+        ts = ts,
+        answer = answer.trim(),
+        n = sources.len(),
+        links = links
+    )
+}
+
+/// 每日/每周回顾（FR-LLM-07）：聚合近 N 天修改的笔记（标题+正文开头）→
+/// 复用 Summarize 路由 + ADR-0005 护栏（用户主动触发，同 rewrite 不读
+/// local_only，仍受 cloud_allowed/敏感词约束）→ 产物写入 notes/reviews/。
+#[tauri::command]
+pub async fn generate_review(
+    range: String, // daily | weekly
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+    guard_cfg: State<'_, Arc<GuardConfig>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    indexer: State<'_, Arc<Indexer>>,
+) -> Result<String, String> {
+    let days: i64 = match range.as_str() {
+        "daily" => 1,
+        "weekly" => 7,
+        _ => return Err(format!("unknown range: {range}")),
+    };
+    let since = chrono::Utc::now().timestamp() - days * 86400;
+    let rows = sqlite
+        .list_timeline(500)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter(|r| r.mtime >= since && !r.path.starts_with("notes/reviews/"))
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return Err("该时间范围内没有笔记，无法生成回顾".into());
+    }
+
+    // 标题 + 正文开头（每篇 200 字，上限 30 篇——控制上下文与隐私面）
+    let root = vault_root();
+    let mut entries = Vec::with_capacity(rows.len().min(30));
+    for r in rows.iter().take(30) {
+        let title = r.title.clone().unwrap_or_else(|| r.path.clone());
+        let body_head = tokio::fs::read_to_string(root.join(&r.path))
+            .await
+            .ok()
+            .map(|t| {
+                t.split_once("---\n\n")
+                    .map(|(_, b)| b.to_string())
+                    .unwrap_or(t)
+            })
+            .unwrap_or_default();
+        let head: String = body_head.chars().take(200).collect();
+        entries.push((title, head));
+    }
+    let digest = build_review_digest(&entries);
+
+    let (chat, model) = registry
+        .chat_for(&routing, Task::Summarize)
+        .map_err(|e| e.to_string())?;
+    match check(&guard_cfg, chat.kind(), &digest, false) {
+        GuardDecision::Allow => {}
+        GuardDecision::Deny(reason) => return Err(reason),
+    }
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    let period = if days == 1 { "今日" } else { "最近一周" };
+    let req = ChatRequest {
+        model,
+        messages: vec![ChatMessage {
+            role: ChatRole::User,
+            content: format!(
+                "以下是我{period}（截至 {today}）修改过的笔记摘要。请生成一份结构化回顾，包含：主要主题、关键进展、值得跟进的点。用中文 Markdown 输出，不要复述原文。\n\n{digest}"
+            ),
+        }],
+        temperature: Some(0.4),
+    };
+    let answer = chat.chat(req).await.map_err(|e| e.to_string())?;
+
+    let sources: Vec<(String, String)> = rows
+        .iter()
+        .take(30)
+        .map(|r| (r.title.clone().unwrap_or_else(|| r.path.clone()), r.path.clone()))
+        .collect();
+    let rel = if days == 1 {
+        format!("notes/reviews/review-{today}.md")
+    } else {
+        format!("notes/reviews/review-week-{today}.md")
+    };
+    let id = lmnotes_core::id::new_note_id(chrono::Utc::now().naive_utc());
+    let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S+00:00").to_string();
+    let title = format!("{period}回顾 {today}");
+    let content = build_review_content(&answer, &sources, &title, &id, &ts);
+    let full = root.join(&rel);
+    if let Some(p) = full.parent() {
+        tokio::fs::create_dir_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&full, &content)
+        .await
+        .map_err(|e| e.to_string())?;
+    let backend = lmnotes_core::backend::fs::FsBackend::new(root.clone());
+    let _ = lmnotes_core::indexer::walk_and_index(&indexer, &backend, &root).await;
+    Ok(rel)
+}
+
 /// 导入报告（dry-run 与执行共用；executed 区分）。
 #[derive(serde::Serialize)]
 pub struct ImportReport {
@@ -2893,9 +3023,10 @@ async fn send_download_get(
 #[cfg(test)]
 mod tests {
     use super::{
-        asset_kind_of, build_extract_audio_cmd, builtin_whisper_models, daily_header,
-        daily_note_rel, download_urls, media_kind_dir, parse_snapshot_ts, pick_preferred_model,
-        render_template_placeholders, scan_source_dir, TimelineEntry,
+        asset_kind_of, build_extract_audio_cmd, build_review_content, build_review_digest,
+        builtin_whisper_models, daily_header, daily_note_rel, download_urls, media_kind_dir,
+        parse_snapshot_ts, pick_preferred_model, render_template_placeholders, scan_source_dir,
+        TimelineEntry,
     };
     use chrono::TimeZone;
     use lmnotes_core::index::schema::ConceptRow;
@@ -2967,6 +3098,26 @@ mod tests {
         assert_eq!(asset_kind_of("m4a"), Some("audio"));
         assert_eq!(asset_kind_of("webm"), Some("video"));
         assert_eq!(asset_kind_of("pdf"), None);
+    }
+
+    #[test]
+    fn review_digest_and_content_format() {
+        // v0.8 FR-LLM-07：digest 聚合条目；产物含 review 标签 + 来源 OKF 链接。
+        let digest = build_review_digest(&[("A".into(), " 内容 ".into()), ("B".into(), "x".into())]);
+        assert!(digest.contains("### A\n内容\n\n### B\nx"), "{digest}");
+
+        let content = build_review_content(
+            "回顾正文",
+            &[("A".into(), "notes/a.md".into())],
+            "今日回顾 2026-09-05",
+            "nt_r",
+            "2026-09-05T10:00:00+00:00",
+        );
+        assert!(content.starts_with("---\ntype: note\n"), "{content}");
+        assert!(content.contains("tags: [review]"));
+        assert!(content.contains("# 今日回顾 2026-09-05"));
+        assert!(content.contains("[A](</notes/a.md>)"), "{content}");
+        assert!(content.contains("来源笔记（1 篇）"));
     }
 
     #[test]
