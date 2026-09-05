@@ -268,6 +268,10 @@ export const en = {
 
   // ── Review (FR-LLM-07, v0.8) ──────────────────────────────────────────
   "review.generating": "⏳ Generating review (LLM)…",
+
+  // ── Global hotkey (v0.8) ──────────────────────────────────────────────
+  "hotkey.title": "⚡ Global hotkey (quick capture)",
+  "hotkey.hint": "Tauri accelerator syntax, e.g. CmdOrCtrl+Shift+L. Takes effect after restart.",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -45,6 +45,7 @@ interface Config {
   };
   guard: { cloud_allowed: boolean; sensitive_patterns: string[] };
   media: { background_threshold_ms: number };
+  capture: { hotkey: string };
 }
 
 interface ProviderHealth {
@@ -424,6 +425,22 @@ export function ProviderSettings(props: { onClose: () => void }) {
               </div>
 
               <LocalSttSetup />
+
+              <div class="data-section">
+                <h3>{t("hotkey.title")}</h3>
+                <input
+                  type="text"
+                  style={{ width: "220px" }}
+                  value={cfg().capture?.hotkey ?? "CmdOrCtrl+Shift+L"}
+                  onInput={(e) =>
+                    setConfig({
+                      ...cfg(),
+                      capture: { hotkey: e.currentTarget.value },
+                    })
+                  }
+                />
+                <p class="muted small">{t("hotkey.hint")}</p>
+              </div>
 
               <div class="data-section">
                 <h3>{t("data.title")}</h3>

@@ -308,12 +308,13 @@ pub fn run() {
             let worker_deps = worker_deps;
             // 媒体任务后台 worker（v0.5 FR-MEDIA-04）：running→pending 兜底 + 常驻循环
             media_tasks::spawn_worker(app.handle().clone(), worker_deps);
-            // 全局快捷键注册（v0.7 FR-CAP-01）。快捷键常量集中在此，改绑只需改这一处。
+            // 全局快捷键注册（v0.7 FR-CAP-01；v0.8 起可配置 config.capture.hotkey，
+            // 保存后重启生效）。注册失败降级：打日志不阻塞，应用内捕获不受影响。
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            const QUICK_CAPTURE_HOTKEY: &str = "CmdOrCtrl+Shift+L";
-            if let Err(e) = app.global_shortcut().register(QUICK_CAPTURE_HOTKEY) {
+            let hotkey = llm_config::Config::load_or_default().capture.hotkey;
+            if let Err(e) = app.global_shortcut().register(hotkey.as_str()) {
                 eprintln!(
-                    "[hotkey] register {QUICK_CAPTURE_HOTKEY} failed: {e} (被占用？快速捕获浮窗仍可从应用内使用)"
+                    "[hotkey] register {hotkey} failed: {e} (被占用？可在设置中修改热键；应用内 Ctrl+N 捕获不受影响)"
                 );
             }
             Ok(())

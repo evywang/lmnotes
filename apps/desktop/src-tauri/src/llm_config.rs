@@ -27,6 +27,29 @@ pub struct Config {
     /// 启动时打开的 vault。None / 失效路径 → 回退默认库 ~/.lmnotes/default。
     #[serde(default)]
     pub last_vault: Option<String>,
+    /// 快速捕获浮窗（v0.8 热键可配置）。旧 config 无此段取默认热键。
+    #[serde(default)]
+    pub capture: CaptureConfig,
+}
+
+/// 全局快捷键配置（Tauri accelerator 语法，如 `CmdOrCtrl+Shift+L`）。
+/// 改动保存后需重启应用生效（注册发生在启动期）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureConfig {
+    #[serde(default = "default_hotkey")]
+    pub hotkey: String,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self {
+            hotkey: default_hotkey(),
+        }
+    }
+}
+
+fn default_hotkey() -> String {
+    "CmdOrCtrl+Shift+L".to_string()
 }
 
 /// 默认 vault 路径（M1a 以来的固定值）。
@@ -255,6 +278,7 @@ impl Default for Config {
             media: MediaConfig::default(),
             vaults: default_vaults(),
             last_vault: None,
+            capture: CaptureConfig::default(),
         }
     }
 }
@@ -695,6 +719,7 @@ mod tests {
             media: MediaConfig::default(),
             vaults: default_vaults(),
             last_vault: None,
+            capture: CaptureConfig::default(),
         }
     }
 
@@ -958,5 +983,21 @@ mod tests {
             resolve_vault(Some(&p), std::path::Path::new("/default")),
             std::path::PathBuf::from(&p)
         );
+    }
+
+    #[test]
+    fn capture_hotkey_default_and_legacy_parse() {
+        // v0.8：默认 CmdOrCtrl+Shift+L；旧 config（无 capture 段）解析取默认；
+        // 自定义值 round-trip 保留。
+        let legacy = serde_yaml::from_str::<Config>(
+            "providers: []\nrouting: {}\nguard:\n  cloud_allowed: false\n  sensitive_patterns: []\n",
+        )
+        .unwrap();
+        assert_eq!(legacy.capture.hotkey, "CmdOrCtrl+Shift+L");
+        let custom = serde_yaml::from_str::<Config>(
+            "providers: []\nrouting: {}\nguard:\n  cloud_allowed: false\n  sensitive_patterns: []\ncapture:\n  hotkey: Ctrl+Shift+K\n",
+        )
+        .unwrap();
+        assert_eq!(custom.capture.hotkey, "Ctrl+Shift+K");
     }
 }

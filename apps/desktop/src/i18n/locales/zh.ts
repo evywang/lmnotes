@@ -267,4 +267,8 @@ export const zh: Record<MessageKey, string> = {
 
   // ── 回顾（FR-LLM-07，v0.8）────────────────────────────────────────────
   "review.generating": "⏳ 回顾生成中…（LLM）",
+
+  // ── 全局热键（v0.8）───────────────────────────────────────────────────
+  "hotkey.title": "⚡ 全局热键（快速捕获浮窗）",
+  "hotkey.hint": "Tauri accelerator 语法，如 CmdOrCtrl+Shift+L；保存后重启应用生效。",
 };
