@@ -272,6 +272,11 @@ export const en = {
   // ── Global hotkey (v0.8) ──────────────────────────────────────────────
   "hotkey.title": "⚡ Global hotkey (quick capture)",
   "hotkey.hint": "Tauri accelerator syntax, e.g. CmdOrCtrl+Shift+L. Takes effect after restart.",
+
+  // ── Search & residency (v0.9) ─────────────────────────────────────────
+  "search.semanticBadge": "semantic",
+  "search.semanticNote": "Semantic search is contributing to ranking.",
+  "palette.ask": "Ask LMNotes",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -271,4 +271,9 @@ export const zh: Record<MessageKey, string> = {
   // ── 全局热键（v0.8）───────────────────────────────────────────────────
   "hotkey.title": "⚡ 全局热键（快速捕获浮窗）",
   "hotkey.hint": "Tauri accelerator 语法，如 CmdOrCtrl+Shift+L；保存后重启应用生效。",
+
+  // ── 搜索与常驻（v0.9）─────────────────────────────────────────────────
+  "search.semanticBadge": "语义",
+  "search.semanticNote": "语义搜索已参与排序。",
+  "palette.ask": "问 LMNotes",
 };

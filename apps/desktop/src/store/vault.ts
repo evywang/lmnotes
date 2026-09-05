@@ -2,15 +2,19 @@ import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 
 export interface SearchHit {
-  id: string;
   path: string;
   title: string | null;
   score: number;
+  snippet: string | null;
+  /** "keyword" | "semantic" | "keyword+semantic" */
+  sources: string;
 }
 
 const [query, setQuery] = createSignal("");
 const [results, setResults] = createSignal<SearchHit[]>([]);
 const [searching, setSearching] = createSignal(false);
+/** 最近一次搜索是否走了向量召回（v0.9 语义搜索指示） */
+const [semantic, setSemantic] = createSignal(false);
 const [activePath, setActivePathRaw] = createSignal<string | null>(null);
 
 // ── 最近打开（v0.7 命令面板 FR-SEARCH-01）──────────────────────────────
@@ -45,22 +49,29 @@ function setActivePath(p: string | null) {
 }
 
 export function useVault() {
-  return { query, setQuery, results, searching, activePath, setActivePath };
+  return { query, setQuery, results, searching, semantic, activePath, setActivePath };
 }
 export { recentPaths };
 
 export async function runSearch(q: string) {
   if (!q.trim()) {
     setResults([]);
+    setSemantic(false);
     return;
   }
   setSearching(true);
   try {
-    const r = await invoke<SearchHit[]>("search", { query: q, limit: 50 });
-    setResults(r);
+    // v0.9 语义混合搜索：向量+BM25 RRF；embed 不可用时后端自动降级纯 BM25
+    const r = await invoke<{ hits: SearchHit[]; semantic: boolean }>("search_hybrid", {
+      query: q,
+      limit: 50,
+    });
+    setResults(r.hits);
+    setSemantic(r.semantic);
   } catch (e) {
     console.error("search failed", e);
     setResults([]);
+    setSemantic(false);
   } finally {
     setSearching(false);
   }

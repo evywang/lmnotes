@@ -14,6 +14,7 @@ import { KnowledgeGraph } from "./graph/KnowledgeGraph";
 import { FileTree } from "./components/FileTree";
 import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
 import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
+import { HighlightText, termsOf } from "./components/HighlightText";
 import { TimelineView } from "./components/TimelineView";
 import { TagCloud } from "./components/TagCloud";
 import { t } from "./i18n";
@@ -39,7 +40,8 @@ function VaultBadge(props: { onOpenSettings: () => void }) {
 }
 
 export function App() {
-  const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
+  const { query, setQuery, results, searching, semantic, activePath, setActivePath } =
+    useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
   const [voiceOpen, setVoiceOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -49,6 +51,8 @@ export function App() {
   const [timelineOpen, setTimelineOpen] = createSignal(false);
   const [tagFilter, setTagFilter] = createSignal<string | null>(null);
   const [reviewBusy, setReviewBusy] = createSignal(false);
+  // 面板直达问答（v0.9）：palette 写入 → ChatDrawer 消费后自动发送
+  const [askQuestion, setAskQuestion] = createSignal<string | null>(null);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
   const [treeOpen, setTreeOpen] = createSignal(false);
 
@@ -256,12 +260,25 @@ export function App() {
           <Show when={searching()}>
             <p class="muted">{t("app.searching")}</p>
           </Show>
+          <Show when={!searching() && results().length > 0 && semantic()}>
+            <p class="muted small semantic-note">{t("search.semanticNote")}</p>
+          </Show>
           <ul class="result-list">
             <For each={results()}>
               {(r) => (
                 <li>
                   <button class="result-item" onClick={() => setActivePath(r.path)}>
-                    <span class="result-title">{r.title || r.path}</span>
+                    <span class="result-title">
+                      <HighlightText text={r.title || r.path} terms={termsOf(query())} />
+                      <Show when={r.sources.includes("semantic")}>
+                        <span class="result-badge">{t("search.semanticBadge")}</span>
+                      </Show>
+                    </span>
+                    <Show when={r.snippet}>
+                      <span class="result-snippet">
+                        <HighlightText text={r.snippet!} terms={termsOf(query())} />
+                      </span>
+                    </Show>
                     <span class="result-path">{r.path}</span>
                   </button>
                 </li>
@@ -315,6 +332,10 @@ export function App() {
         onClose={() => setPaletteOpen(false)}
         onOpenNote={(path) => setActivePath(path)}
         actions={paletteActions}
+        onAsk={(q) => {
+          setAskQuestion(q);
+          setChatOpen(true);
+        }}
       />
 
       {/* 文本输入对话框宿主（应用名标题，替代 window.prompt） */}
@@ -341,6 +362,8 @@ export function App() {
         <ChatDrawer
           onClose={() => setChatOpen(false)}
           onNavigate={(path) => setActivePath(path)}
+          pendingQuestion={askQuestion()}
+          onQuestionConsumed={() => setAskQuestion(null)}
         />
       </Show>
       <Show when={graphOpen()}>

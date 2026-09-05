@@ -1,4 +1,4 @@
-import { createSignal, For, Show, onCleanup, onMount } from "solid-js";
+import { createEffect, createSignal, For, Show, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { t } from "../i18n";
@@ -25,6 +25,9 @@ interface HistoryRow {
 export function ChatDrawer(props: {
   onClose: () => void;
   onNavigate: (path: string) => void;
+  /** v0.9 面板直达问答：设置后自动填入并发送，随后回调清空 */
+  pendingQuestion?: string | null;
+  onQuestionConsumed?: () => void;
 }) {
   const [messages, setMessages] = createSignal<ChatMessage[]>([]);
   const [input, setInput] = createSignal("");
@@ -126,6 +129,16 @@ export function ChatDrawer(props: {
       setStreaming(false);
     }
   };
+
+  // 面板直达问答（v0.9）：pendingQuestion 到达即自动发送（先消费再发，防重复）
+  createEffect(() => {
+    const q = props.pendingQuestion;
+    if (q && q.trim()) {
+      props.onQuestionConsumed?.();
+      setInput(q);
+      void ask();
+    }
+  });
 
   const clearHistory = async () => {
     try {
