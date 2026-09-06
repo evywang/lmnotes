@@ -117,6 +117,7 @@ export function TopBar(props: Props) {
               <div class="tb-menu-sep" />
               <button
                 class="tb-menu-item"
+                disabled={props.busy}
                 onClick={() => {
                   setMenuOpen(false);
                   props.onAction("daily-review");
@@ -126,6 +127,7 @@ export function TopBar(props: Props) {
               </button>
               <button
                 class="tb-menu-item"
+                disabled={props.busy}
                 onClick={() => {
                   setMenuOpen(false);
                   props.onAction("weekly-review");

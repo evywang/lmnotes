@@ -13,7 +13,7 @@ export function RightPanel() {
   const { panelOpen, setPanelOpen } = useUi();
   const { suggestions } = useSuggestions();
   return (
-    <aside class={`right-panel ${panelOpen() ? "open" : ""}`} aria-hidden={!panelOpen()}>
+    <aside class={`right-panel ${panelOpen() ? "open" : ""}`} inert={!panelOpen()}>
       <header class="rp-head">
         <span class="rp-title">
           <Icon name="spark" size={14} /> {t("panel.suggestions")}

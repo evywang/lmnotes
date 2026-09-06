@@ -8,6 +8,7 @@ export const zh: Record<MessageKey, string> = {
   // ── App shell ─────────────────────────────────────────────────────────
   "app.searchPlaceholder": "搜索…（回车）",
   "app.newNoteTitle": "新笔记",
+  "app.untitled": "未命名",
   "app.noteTitlePrompt": "笔记标题：",
   "app.templatePrompt": "模板名（留空 = 空白笔记）：",
   "app.noTemplate": "（空白笔记）",

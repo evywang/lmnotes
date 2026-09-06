@@ -35,7 +35,12 @@ export function Rail(props: Props) {
   return (
     <nav class="rail" aria-label={t("nav.label")}>
       {/* 笔记 = 应用默认态（上下文栏始终在场），恒激活 */}
-      <button class="rail-item active" title={t("nav.notes")} aria-label={t("nav.notes")}>
+      <button
+        class="rail-item active"
+        title={t("nav.notes")}
+        aria-label={t("nav.notes")}
+        aria-current="page"
+      >
         <Icon name="pencil" size={18} />
       </button>
       <button
@@ -73,7 +78,7 @@ export function Rail(props: Props) {
       <button
         class="rail-item"
         title={t("nav.tasks")}
-        aria-label={t("nav.tasks")}
+        aria-label={activeMediaTaskCount() > 0 ? `${t("nav.tasks")} (${activeMediaTaskCount()})` : t("nav.tasks")}
         onClick={props.onTasks}
       >
         <span class="rail-icon-wrap">

@@ -98,6 +98,8 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
     try {
       const path = await invoke<string>("generate_review", { range });
       props.onNavigate?.(path);
+      // 回顾文件不触发 Tauri quick-note-saved/vault-changed 事件——本地事件通知 App 刷新
+      window.dispatchEvent(new Event("lmnotes:refresh"));
     } catch (e) {
       void message(String(e), { title: APP_NAME, kind: "error" });
     } finally {

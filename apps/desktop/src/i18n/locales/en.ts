@@ -7,6 +7,7 @@ export const en = {
   // ── App shell ─────────────────────────────────────────────────────────
   "app.searchPlaceholder": "Search… (Enter)",
   "app.newNoteTitle": "New note",
+  "app.untitled": "Untitled",
   "app.noteTitlePrompt": "Note title:",
   "app.templatePrompt": "Template name (empty = blank note):",
   "app.noTemplate": "(blank note)",
