@@ -89,7 +89,11 @@ export function App() {
 
   // 新建笔记（spec §6）：零弹窗直接建草稿，标题=「未命名 时间戳」，在编辑器内改；
   // 模板走上下文栏 ＋ 按钮的 ▾ 菜单（createNote(templatePath)）。
+  // creating 守卫：快速连按 ⌘N 时，后端同分钟同名路径会静默覆盖，前端先挡一道。
+  let creatingNote = false;
   const createNote = async (templatePath?: string) => {
+    if (creatingNote) return;
+    creatingNote = true;
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     const title = `${t("app.untitled")} ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
@@ -104,6 +108,8 @@ export function App() {
       setTreeRefresh((n) => n + 1);
     } catch (e) {
       console.error("create note", e);
+    } finally {
+      creatingNote = false;
     }
   };
 
