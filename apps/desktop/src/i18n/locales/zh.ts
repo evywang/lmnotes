@@ -332,4 +332,11 @@ export const zh: Record<MessageKey, string> = {
   "topbar.unsaved": "未保存",
   "topbar.saving": "保存中…",
   "rewrite.failedWhole": "改写失败：",
+
+  "panel.suggestions": "建议",
+  "panel.close": "关闭",
+  "welcome.subtitle": "本地优先的 AI 笔记库",
+  "welcome.keySearch": "搜索或执行命令",
+  "welcome.keyNew": "新建笔记",
+  "welcome.keyAsk": "问 LMNotes",
 };

@@ -333,6 +333,13 @@ export const en = {
   "topbar.unsaved": "Unsaved",
   "topbar.saving": "Saving…",
   "rewrite.failedWhole": "Rewrite failed: ",
+
+  "panel.suggestions": "Suggestions",
+  "panel.close": "Close",
+  "welcome.subtitle": "Your local-first AI notebook",
+  "welcome.keySearch": "Search or run a command",
+  "welcome.keyNew": "New note",
+  "welcome.keyAsk": "Ask LMNotes",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;
