@@ -53,10 +53,16 @@ export function useVault() {
 }
 export { recentPaths };
 
+// 请求序号：实时搜索下用户快速输入/清空时，丢弃过期响应避免旧结果回写
+let searchSeq = 0;
+
 export async function runSearch(q: string) {
+  const seq = ++searchSeq;
   if (!q.trim()) {
-    setResults([]);
-    setSemantic(false);
+    if (seq === searchSeq) {
+      setResults([]);
+      setSemantic(false);
+    }
     return;
   }
   setSearching(true);
@@ -66,13 +72,16 @@ export async function runSearch(q: string) {
       query: q,
       limit: 50,
     });
+    if (seq !== searchSeq) return; // 已有更新的请求，过期结果丢弃
     setResults(r.hits);
     setSemantic(r.semantic);
   } catch (e) {
     console.error("search failed", e);
-    setResults([]);
-    setSemantic(false);
+    if (seq === searchSeq) {
+      setResults([]);
+      setSemantic(false);
+    }
   } finally {
-    setSearching(false);
+    if (seq === searchSeq) setSearching(false);
   }
 }
