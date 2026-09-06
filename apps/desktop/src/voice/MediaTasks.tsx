@@ -34,6 +34,11 @@ export function openMediaTasks() {
   setOpen(true);
 }
 
+/** 进行中任务数（pending+running）——导航栏徽标（v1.0 spec §3.1）。 */
+export function activeMediaTaskCount(): number {
+  return tasks().filter((t) => t.status === "pending" || t.status === "running").length;
+}
+
 async function refresh() {
   try {
     setTasks(await invoke<MediaTaskDto[]>("list_media_tasks", { status: null }));
