@@ -328,6 +328,11 @@ export const en = {
   "ctx.askPrefix": "Ask LMNotes",
   "ctx.emptyVault": "Vault is empty — press ⌘N to create your first note",
   "ctx.tagFilterClear": "Clear tag filter",
+
+  "topbar.aiMenu": "AI",
+  "topbar.unsaved": "Unsaved",
+  "topbar.saving": "Saving…",
+  "rewrite.failedWhole": "Rewrite failed: ",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -327,4 +327,9 @@ export const zh: Record<MessageKey, string> = {
   "ctx.askPrefix": "问 LMNotes",
   "ctx.emptyVault": "库还是空的 — ⌘N 新建第一条笔记",
   "ctx.tagFilterClear": "清除标签过滤",
+
+  "topbar.aiMenu": "AI",
+  "topbar.unsaved": "未保存",
+  "topbar.saving": "保存中…",
+  "rewrite.failedWhole": "改写失败：",
 };

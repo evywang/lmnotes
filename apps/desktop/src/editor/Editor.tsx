@@ -6,6 +6,7 @@ import { useCodeMirror } from "./solid-cm";
 import { RewriteMenu } from "./RewriteMenu";
 import { HistoryPanel } from "./HistoryPanel";
 import { APP_NAME } from "../components/PromptDialog";
+import { TopBar, type TopBarAction } from "../components/TopBar";
 import type { EditorView } from "@codemirror/view";
 import { t } from "../i18n";
 
@@ -22,6 +23,8 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [mediaBusy, setMediaBusy] = createSignal(false); // 音视频转录中（FR-CAP-04）
   const [queuedHint, setQueuedHint] = createSignal(false); // 已入队提示（v0.5 分流）
+  const [aiBusy, setAiBusy] = createSignal(false);
+  const [saving, setSaving] = createSignal(false);
   const [extracting, setExtracting] = createSignal(false);
   let saveTimer: ReturnType<typeof setTimeout> | null = null;
   let viewGetter = () => undefined as EditorView | undefined;
@@ -70,14 +73,62 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
     }
   };
 
+  // 整篇改写（TopBar ✦）：复用 rewrite_selection——selection=全文，替换全文。
+  // 撤销路径与选区改写一致：CodeMirror history + 改写前 save_snapshot。
+  const rewriteWhole = async (action: string) => {
+    const view = viewGetter();
+    if (!view || aiBusy()) return;
+    setAiBusy(true);
+    try {
+      const full = view.state.doc.toString();
+      await invoke("save_snapshot", { conceptPath: props.path, text: full });
+      const result = await invoke<string>("rewrite_selection", { action, selection: full });
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: result } });
+    } catch (e) {
+      void message(`${t("rewrite.failedWhole")}${e}`, { title: APP_NAME, kind: "error" });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  // 生成回顾后经 onNavigate 打开（App 的事件刷新会更新列表）
+  const generateReview = async (range: "daily" | "weekly") => {
+    if (aiBusy()) return;
+    setAiBusy(true);
+    try {
+      const path = await invoke<string>("generate_review", { range });
+      props.onNavigate?.(path);
+    } catch (e) {
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const onTopAction = (a: TopBarAction) => {
+    if (a === "history") setHistoryOpen(true);
+    else if (a === "preview") setPreview((v) => !v);
+    else if (a === "extract") void extractActions();
+    else if (a === "daily-review") void generateReview("daily");
+    else if (a === "weekly-review") void generateReview("weekly");
+    else void rewriteWhole(a);
+  };
+
   const onChange = (doc: string) => {
     setContent(doc);
     setDirty(true);
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
+      setSaving(true);
       invoke("save_concept", { path: props.path, text: doc })
-        .then(() => setDirty(false))
-        .catch((e) => console.error("save failed", e));
+        .then(() => {
+          setDirty(false);
+          setSaving(false);
+        })
+        .catch((e) => {
+          console.error("save failed", e);
+          setSaving(false);
+        });
     }, 800);
   };
 
@@ -205,42 +256,17 @@ export function Editor(props: { path: string; onNavigate?: (path: string) => voi
 
   return (
     <div class="editor-wrap">
-      <div class="editor-toolbar">
-        <span class="editor-path">{props.path}</span>
-        <Show when={dirty()}>
-          <span class="dirty-dot">●</span>
-        </Show>
-        <Show when={mediaBusy()}>
-          <span class="muted small">🎙 {t("editor.mediaTranscribing")}</span>
-        </Show>
-        <Show when={queuedHint()}>
-          <span class="muted small">⏳ {t("editor.mediaQueued")}</span>
-        </Show>
-        <Show when={canExtractActions()}>
-          <button
-            class="preview-toggle"
-            disabled={extracting()}
-            onClick={extractActions}
-            title={t("editor.extractTooltip")}
-          >
-            {extracting() ? t("editor.extractBusy") : t("editor.extractActions")}
-          </button>
-        </Show>
-        <button
-          class="preview-toggle"
-          onClick={() => setHistoryOpen(true)}
-          title={t("editor.historyTooltip")}
-        >
-          🕘 {t("editor.history")}
-        </button>
-        <button
-          class={`preview-toggle ${preview() ? "active" : ""}`}
-          onClick={() => setPreview((v) => !v)}
-          title={t("editor.toggleTooltip")}
-        >
-          {preview() ? t("editor.edit") : t("editor.preview")}
-        </button>
-      </div>
+      <TopBar
+        path={props.path}
+        dirty={dirty()}
+        saving={saving()}
+        mediaBusy={mediaBusy()}
+        queuedHint={queuedHint()}
+        canExtract={canExtractActions()}
+        busy={aiBusy() || extracting()}
+        previewing={preview()}
+        onAction={onTopAction}
+      />
       <div class={`editor-content-area ${preview() ? "split" : ""}`}>
         <Show when={loaded()} fallback={<p class="muted">{t("editor.loading")}</p>}>
           <div
