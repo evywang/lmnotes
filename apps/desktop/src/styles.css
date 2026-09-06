@@ -1,21 +1,3 @@
-:root {
-  --bg: #1e1e2e;
-  --fg: #cdd6f4;
-  --accent: #89b4fa;
-  --border: #45475a;
-  --muted: #6c7086;
-  --hover: #313244;
-}
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #eff1f5;
-    --fg: #4c4f69;
-    --accent: #1e66f5;
-    --border: #bcc0cc;
-    --muted: #9ca0b0;
-    --hover: #e6e9ef;
-  }
-}
 * {
   box-sizing: border-box;
 }
@@ -26,10 +8,10 @@ body,
   margin: 0;
 }
 body {
-  background: var(--bg);
-  color: var(--fg);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size: 14px;
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
 }
 
 /* 三栏布局 */

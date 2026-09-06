@@ -1,0 +1,103 @@
+/**
+ * 「石墨」设计令牌（v1.0 UI 重设计，spec §4）。
+ * - 颜色令牌为主题引擎（src/theme）的覆盖面：运行时逐个 setProperty 覆写。
+ * - 亮色值挂 [data-theme-mode="light"]（由主题引擎写入；「跟随系统」时引擎
+ *   监听 prefers-color-scheme）。默认（无属性）= 石墨·暗。
+ * - 末尾保留旧变量别名，未迁移的浮层样式（P2 处理）自动换肤。
+ */
+:root {
+  color-scheme: dark;
+
+  /* ── 可主题化颜色（19 键，主题引擎覆盖面，spec §4.1）── */
+  --surface-0: #101014; /* 画布/主区背景 */
+  --surface-1: #16161b; /* 导航栏/上下文栏/右面板 */
+  --surface-2: #1c1c23; /* 弹层/抽屉/卡片 */
+  --surface-inset: #0c0c10; /* 输入框/凹面 */
+  --surface-hover: #22232a;
+  --surface-active: #2a2b34;
+  --border-subtle: #232329;
+  --border-default: #2c2c34;
+  --border-strong: #3a3a44;
+  --text-1: #dcdde3;
+  --text-2: #a3a5b1;
+  --text-3: #6f7280;
+  --accent: #7c9cf5;
+  --accent-hover: #8facf7;
+  --accent-fg: #0f1016;
+  --accent-soft: rgba(124, 156, 245, 0.14);
+  --success: #6dbf8b;
+  --warning: #e0b352;
+  --danger: #e07a7a;
+
+  --shadow-1: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 40px rgba(0, 0, 0, 0.5);
+
+  /* ── 非主题化令牌（spec §4.2）── */
+  --font-ui: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --dur-fast: 120ms;
+  --dur-med: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --z-popover: 100;
+  --z-drawer: 200;
+  --z-dialog: 300;
+  --z-palette: 400;
+  --z-toast: 500;
+  --ctl-sm: 26px;
+  --ctl-md: 30px;
+  --ctl-lg: 34px;
+  --rail-w: 48px;
+  --context-w: 288px;
+  --panel-w: 300px;
+  --topbar-h: 44px;
+
+  /* ── 旧变量别名：styles.css 未迁移段继续生效，随主题换肤 ── */
+  --bg: var(--surface-1);
+  --fg: var(--text-1);
+  --border: var(--border-default);
+  --muted: var(--text-3);
+  --hover: var(--surface-hover);
+  --focus-ring: var(--accent);
+}
+
+:root[data-theme-mode="light"] {
+  color-scheme: light;
+  --surface-0: #f0f1f4;
+  --surface-1: #fafafa;
+  --surface-2: #ffffff;
+  --surface-inset: #eef0f3;
+  --surface-hover: #eceef2;
+  --surface-active: #e2e5ec;
+  --border-subtle: #e6e7eb;
+  --border-default: #d9dbe2;
+  --border-strong: #c4c7d1;
+  --text-1: #26282e;
+  --text-2: #5c5f6a;
+  --text-3: #8d919e;
+  --accent: #3b66d8;
+  --accent-hover: #4a74de;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(59, 102, 216, 0.1);
+  --success: #2f9e5f;
+  --warning: #b07d1a;
+  --danger: #cc4b4b;
+  --shadow-1: 0 4px 16px rgba(23, 25, 35, 0.12);
+  --shadow-2: 0 12px 40px rgba(23, 25, 35, 0.18);
+}
