@@ -46,9 +46,13 @@ export function TopBar(props: Props) {
       <div class="topbar-crumb" title={props.path}>
         <For each={crumbs()}>
           {(seg, i) => (
-            <Show when={i() > 0} fallback={<span class="crumb-current">{seg}</span>}>
-              <span class="crumb-sep">›</span>
+            /* 末段=笔记名（crumb-current 加粗），其余为父级目录 */
+            <Show
+              when={i() < crumbs().length - 1}
+              fallback={<span class="crumb-current">{seg}</span>}
+            >
               <span class="crumb-parent">{seg}</span>
+              <span class="crumb-sep">›</span>
             </Show>
           )}
         </For>
