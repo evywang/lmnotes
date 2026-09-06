@@ -303,6 +303,16 @@ export const en = {
   "settings.themeRescan": "Rescan",
   "settings.themeInvalid": "Invalid theme files (skipped): {files}",
   "palette.switchTheme": "Switch theme",
+
+  "nav.label": "Navigation",
+  "nav.notes": "Notes (⌘1)",
+  "nav.daily": "Today's note (⌘D)",
+  "nav.timeline": "Timeline",
+  "nav.graph": "Knowledge graph (⌘G)",
+  "nav.ask": "Ask LMNotes (⌘J)",
+  "nav.tasks": "Media tasks",
+  "nav.settings": "Settings (⌘,)",
+  "nav.vaultTooltip": "Current vault: {name}",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -302,4 +302,14 @@ export const zh: Record<MessageKey, string> = {
   "settings.themeRescan": "重新扫描",
   "settings.themeInvalid": "已跳过的无效主题文件：{files}",
   "palette.switchTheme": "切换主题",
+
+  "nav.label": "导航",
+  "nav.notes": "笔记 (⌘1)",
+  "nav.daily": "今日笔记 (⌘D)",
+  "nav.timeline": "时间线",
+  "nav.graph": "知识图谱 (⌘G)",
+  "nav.ask": "问 LMNotes (⌘J)",
+  "nav.tasks": "媒体任务",
+  "nav.settings": "设置 (⌘,)",
+  "nav.vaultTooltip": "当前库：{name}",
 };
