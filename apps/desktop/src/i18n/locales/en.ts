@@ -298,6 +298,11 @@ export const en = {
   "theme.graphiteLight": "Graphite · Light",
   "theme.warmPaper": "Warm Paper",
   "theme.inkBlack": "Ink Black",
+  "settings.appearance": "Appearance",
+  "settings.themeAuto": "Follow system",
+  "settings.themeRescan": "Rescan",
+  "settings.themeInvalid": "Invalid theme files (skipped): {files}",
+  "palette.switchTheme": "Switch theme",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

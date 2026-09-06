@@ -18,6 +18,7 @@ import { HighlightText, termsOf } from "./components/HighlightText";
 import { TimelineView } from "./components/TimelineView";
 import { TagCloud } from "./components/TagCloud";
 import { t } from "./i18n";
+import { allThemes, setTheme } from "./theme";
 
 /** 侧栏当前库指示（v0.4 多库）：显示库名，点击打开设置切换。 */
 function VaultBadge(props: { onOpenSettings: () => void }) {
@@ -211,6 +212,13 @@ export function App() {
     { id: "weekly-review", icon: "📆", label: t("palette.weeklyReview"), run: () => void generateReview("weekly") },
     { id: "tasks", icon: "⏳", label: t("palette.tasks"), run: () => openMediaTasks() },
     { id: "settings", icon: "⚙", label: t("palette.settings"), run: () => setSettingsOpen(true) },
+    ...allThemes().map((th) => ({
+      id: `theme-${th.id}`,
+      icon: "◐",
+      label: `${t("palette.switchTheme")}: ${th.builtin ? t(th.nameKey!) : th.name}`,
+      run: () => setTheme(th.id),
+    })),
+    { id: "theme-auto", icon: "◐", label: `${t("palette.switchTheme")}: ${t("settings.themeAuto")}`, run: () => setTheme("auto") },
   ];
 
   return (

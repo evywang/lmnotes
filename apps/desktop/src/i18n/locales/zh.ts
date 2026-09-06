@@ -297,4 +297,9 @@ export const zh: Record<MessageKey, string> = {
   "theme.graphiteLight": "石墨 · 亮",
   "theme.warmPaper": "暖纸",
   "theme.inkBlack": "墨黑",
+  "settings.appearance": "外观",
+  "settings.themeAuto": "跟随系统",
+  "settings.themeRescan": "重新扫描",
+  "settings.themeInvalid": "已跳过的无效主题文件：{files}",
+  "palette.switchTheme": "切换主题",
 };

@@ -6,6 +6,7 @@ import { LocalSttSetup } from "../voice/LocalSttSetup";
 import { open as openDialog, save as saveDialog, message, ask } from "@tauri-apps/plugin-dialog";
 import { APP_NAME } from "../components/PromptDialog";
 import { VaultSection } from "./VaultSection";
+import { ThemePicker } from "../theme/ThemePicker";
 
 interface ProviderRefSer {
   provider: string;
@@ -303,6 +304,12 @@ export function ProviderSettings(props: { onClose: () => void }) {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* 外观：主题插件（v1.0 spec §4.3） */}
+              <div class="appearance-section">
+                <h3>{t("settings.appearance")}</h3>
+                <ThemePicker />
               </div>
 
               <VaultSection />
