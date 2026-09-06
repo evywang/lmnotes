@@ -292,6 +292,12 @@ export const en = {
   "backup.nowBtn": "Back up now",
   "backup.running": "Backing up…",
   "backup.hint": "ZIP snapshots exclude derived data (.lmnotes/). Older copies beyond the keep limit are pruned automatically.",
+
+  // ── Theme (v1.0) ──────────────────────────────────────────────────────
+  "theme.graphiteDark": "Graphite · Dark",
+  "theme.graphiteLight": "Graphite · Light",
+  "theme.warmPaper": "Warm Paper",
+  "theme.inkBlack": "Ink Black",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

@@ -291,4 +291,10 @@ export const zh: Record<MessageKey, string> = {
   "backup.nowBtn": "立即备份",
   "backup.running": "备份中…",
   "backup.hint": "zip 快照排除派生数据（.lmnotes/）；超出保留份数的旧备份自动清理。",
+
+  // ── 主题（v1.0）───────────────────────────────────────────────────────
+  "theme.graphiteDark": "石墨 · 暗",
+  "theme.graphiteLight": "石墨 · 亮",
+  "theme.warmPaper": "暖纸",
+  "theme.inkBlack": "墨黑",
 };
