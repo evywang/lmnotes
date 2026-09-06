@@ -313,6 +313,21 @@ export const en = {
   "nav.tasks": "Media tasks",
   "nav.settings": "Settings (⌘,)",
   "nav.vaultTooltip": "Current vault: {name}",
+
+  "ctx.searchPlaceholder": "Search or ask…",
+  "ctx.clearSearch": "Clear search",
+  "ctx.newNote": "New note",
+  "ctx.newNoteTooltip": "New note (⌘N)",
+  "ctx.blankNote": "Blank note",
+  "ctx.import": "Import",
+  "ctx.view_notes": "Notes",
+  "ctx.view_tags": "Tags",
+  "ctx.view_files": "Files",
+  "ctx.today": "Today",
+  "ctx.noResults": "No matches — try asking LMNotes",
+  "ctx.askPrefix": "Ask LMNotes",
+  "ctx.emptyVault": "Vault is empty — press ⌘N to create your first note",
+  "ctx.tagFilterClear": "Clear tag filter",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;
