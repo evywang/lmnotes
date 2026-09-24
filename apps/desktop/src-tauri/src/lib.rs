@@ -409,6 +409,7 @@ pub fn run() {
             commands::create_media_note,
             commands::describe_image,
             commands::list_templates,
+            commands::list_themes,
             commands::create_note_from_template,
             commands::export_vault_zip,
             commands::init_git_repo,

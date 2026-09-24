@@ -1895,6 +1895,51 @@ created: {}
     Ok(path)
 }
 
+// ============ 主题插件（v1.0 spec §4.3）============
+
+/// 用户主题文件原始载荷：文件名 + JSON 文本（校验在前端 theme/index.ts）。
+#[derive(serde::Serialize)]
+pub struct ThemeFile {
+    pub file: String,
+    pub json: String,
+}
+
+/// 单个主题文件大小上限（spec：防异常大文件）。
+const THEME_FILE_MAX: u64 = 64 * 1024;
+
+/// 扫描目录下全部 *.theme.json（不存在返回空；按文件名排序）。纯函数，便于单测。
+fn scan_theme_dir(dir: &std::path::Path) -> Vec<ThemeFile> {
+    let mut out: Vec<ThemeFile> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".theme.json") {
+            continue;
+        }
+        // 跟随符号链接取目标大小：超限判定对 symlink 指向的真实文件生效；
+        // 元数据读取失败时按超限处理（跳过），保持安全默认。
+        let oversize = std::fs::metadata(e.path())
+            .map(|m| m.is_file() && m.len() > THEME_FILE_MAX)
+            .unwrap_or(true);
+        if oversize {
+            continue;
+        }
+        if let Ok(json) = std::fs::read_to_string(e.path()) {
+            out.push(ThemeFile { file: name, json });
+        }
+    }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
+}
+
+/// 列出 ~/.lmnotes/themes/ 下的用户主题（只读；解析与校验由前端负责）。
+#[tauri::command]
+pub fn list_themes() -> Result<Vec<ThemeFile>, String> {
+    Ok(scan_theme_dir(&lmnotes_home().join("themes")))
+}
+
 // ============ 媒体任务队列（FR-MEDIA-04，v0.5）============
 
 /// 媒体任务 DTO（前端任务中心行）。
@@ -3184,7 +3229,7 @@ mod tests {
         asset_kind_of, build_extract_audio_cmd, build_review_content, build_review_digest,
         builtin_whisper_models, daily_header, daily_note_rel, download_urls, media_kind_dir,
         parse_snapshot_ts, pick_preferred_model, render_template_placeholders, scan_source_dir,
-        TimelineEntry,
+        scan_theme_dir, TimelineEntry,
     };
     use chrono::TimeZone;
     use lmnotes_core::index::schema::ConceptRow;
@@ -3448,5 +3493,30 @@ mod tests {
     #[test]
     fn pick_none_when_nothing_downloaded() {
         assert_eq!(pick_preferred_model(&names(&[])), None);
+    }
+
+    // ============ 主题引擎（v1.0 spec §4.3）============
+
+    #[test]
+    fn scan_theme_dir_filters_sorts_and_caps_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        std::fs::write(dir.join("b.theme.json"), r#"{"id":"b"}"#).unwrap();
+        std::fs::write(dir.join("a.theme.json"), r#"{"id":"a"}"#).unwrap();
+        std::fs::write(dir.join("skip.txt"), "not a theme").unwrap();
+        let big = format!("{{{}", "x".repeat(65 * 1024));
+        std::fs::write(dir.join("big.theme.json"), &big).unwrap();
+
+        let themes = scan_theme_dir(dir);
+        assert_eq!(themes.len(), 2, "只收 *.theme.json 且超 64KB 的跳过");
+        assert_eq!(themes[0].file, "a.theme.json", "按文件名排序");
+        assert_eq!(themes[1].json, r#"{"id":"b"}"#);
+    }
+
+    #[test]
+    fn scan_theme_dir_missing_dir_is_empty() {
+        // tempdir 下的 themes/ 子路径必然不存在
+        let dir = tempfile::tempdir().unwrap().path().join("themes");
+        assert!(scan_theme_dir(&dir).is_empty());
     }
 }
