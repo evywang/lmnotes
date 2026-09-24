@@ -18,9 +18,6 @@ use lmnotes_core::llm::{ChatMessage, ChatRequest, ChatRole};
 use lmnotes_core::okf::concept::Concept;
 use lmnotes_core::search::{SearchEngine, SearchHit};
 use std::path::{Path, PathBuf};
-
-/// Windows 反斜杠（避免源码里写字面量转义）。
-const BS: char = '\u{005C}';
 use std::sync::Arc;
 use tauri::{Emitter, State};
 
@@ -38,6 +35,125 @@ pub fn search(
     engine
         .search(&query, limit.unwrap_or(20))
         .map_err(|e| e.to_string())
+}
+
+// ============ 语义混合搜索（v0.9 搜索与常驻）============
+
+// ============ 常驻（v0.9）：开机自启读写 ============
+
+#[tauri::command]
+pub fn get_autostart(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_autostart(enabled: bool, app: tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launch = app.autolaunch();
+    if enabled {
+        launch.enable()
+    } else {
+        launch.disable()
+    }
+    .map_err(|e| e.to_string())
+}
+
+/// 混合搜索命中（侧栏语义搜索 FR-SEARCH-02 补全）。
+#[derive(serde::Serialize)]
+pub struct HybridHit {
+    pub path: String,
+    pub title: Option<String>,
+    pub score: f64,
+    /// 命中词附近截取的正文片段（纯文本，前端高亮）。
+    pub snippet: Option<String>,
+    /// "keyword" | "semantic" | "keyword+semantic"
+    pub sources: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct HybridSearchResponse {
+    pub hits: Vec<HybridHit>,
+    /// 本次是否成功走了向量召回（false = embed 失败/未配置，纯 BM25 降级）。
+    pub semantic: bool,
+}
+
+/// 混合搜索：BM25 + 向量 KNN → RRF 融合（k=60）→ 元数据富化 + 片段。
+/// embed 3s 超时，失败/无路由静默降级纯 BM25（不阻塞侧栏）。
+#[tauri::command]
+pub async fn search_hybrid(
+    query: String,
+    limit: Option<usize>,
+    engine: State<'_, Arc<SearchEngine>>,
+    sqlite: State<'_, Arc<SqliteIndex>>,
+    registry: State<'_, Arc<Registry>>,
+    routing: State<'_, Arc<Routing>>,
+) -> Result<HybridSearchResponse, String> {
+    use lmnotes_core::search::hybrid_fuse;
+
+    let limit = limit.unwrap_or(20).clamp(1, 50);
+    let bm25 = engine.search(&query, limit).map_err(|e| e.to_string())?;
+
+    // 向量召回（可失败，降级）
+    let mut semantic = false;
+    let mut vector_ids: Vec<String> = Vec::new();
+    if let Ok((embedder, model)) = registry.embed_for(&routing, Task::Embed) {
+        let embedded = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            embedder.embed(&model, std::slice::from_ref(&query)),
+        )
+        .await;
+        if let Ok(Ok(vectors)) = embedded {
+            if let Some(qvec) = vectors.into_iter().next() {
+                match sqlite.vector_search(&qvec, limit) {
+                    Ok(hits) => {
+                        vector_ids = hits.into_iter().map(|(id, _)| id).collect();
+                        semantic = true;
+                    }
+                    Err(e) => eprintln!("[search_hybrid] vector_search fail: {e}"),
+                }
+            }
+        } else {
+            eprintln!("[search_hybrid] embed timeout/fail — fallback to BM25");
+        }
+    }
+
+    let fused = hybrid_fuse(&bm25, &vector_ids, limit);
+    let root = vault_root();
+    let mut out = Vec::with_capacity(fused.len());
+    for f in fused {
+        let Some(row) = sqlite.get_concept(&f.id).map_err(|e| e.to_string())? else {
+            continue;
+        };
+        let sources = match (f.in_bm25, f.in_vector) {
+            (true, true) => "keyword+semantic",
+            (false, true) => "semantic",
+            (true, false) => "keyword",
+            (false, false) => unreachable!(),
+        };
+        let snippet = tokio::fs::read_to_string(root.join(&row.path))
+            .await
+            .ok()
+            .and_then(|text| {
+                let body = text
+                    .split_once("\n---\n\n")
+                    .map(|(_, b)| b)
+                    .unwrap_or(&text);
+                let s = lmnotes_core::search::make_snippet(body, &query, 160);
+                (!s.is_empty()).then_some(s)
+            });
+        out.push(HybridHit {
+            path: row.path,
+            title: row.title,
+            score: f.score,
+            snippet,
+            sources: sources.to_string(),
+        });
+    }
+    Ok(HybridSearchResponse {
+        hits: out,
+        semantic,
+    })
 }
 
 /// 双链补全候选（FR-CAP-03）：title/alias/path 子串匹配，title 命中优先。
@@ -1480,23 +1596,78 @@ fn mime_from_ext(ext: &str) -> String {
 }
 
 // ============ 数据导出（FR-STORE-05，v0.5）============
+// （递归收集逻辑 v0.9 移至 backup::collect_files 与自动备份共用）
 
-/// 递归收集 vault 内需导出的相对路径（排除 .lmnotes/ 派生数据）。
-fn collect_export_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for e in entries.flatten() {
-            let p = e.path();
-            if p.is_dir() {
-                // 跳过派生数据目录
-                if p.file_name().map(|n| n == ".lmnotes").unwrap_or(false) {
-                    continue;
-                }
-                collect_export_files(&p, out);
-            } else {
-                out.push(p);
-            }
-        }
-    }
+// ============ 自动备份（v0.9「搜索与常驻」）============
+
+#[derive(serde::Serialize)]
+pub struct BackupStatus {
+    pub enabled: bool,
+    pub dest_dir: String,
+    pub interval_hours: u64,
+    pub keep: usize,
+    /// dest_dir 中现有备份数（0 = 从未备份）。
+    pub count: usize,
+    /// 最新一份备份文件名（None = 无）。
+    pub latest: Option<String>,
+}
+
+fn backup_dest_dir(cfg: &crate::llm_config::BackupConfig, root: &Path) -> PathBuf {
+    cfg.dest_dir
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| crate::backup::default_dest_dir(root))
+}
+
+#[tauri::command]
+pub fn get_backup_status() -> Result<BackupStatus, String> {
+    let cfg = crate::llm_config::Config::load_or_default();
+    let root = vault_root();
+    let dest = backup_dest_dir(&cfg.backup, &root);
+    let vault_name = root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "default".into());
+    let mut names: Vec<String> = std::fs::read_dir(&dest)
+        .map(|rd| {
+            rd.flatten()
+                .filter_map(|e| {
+                    let n = e.file_name().to_string_lossy().into_owned();
+                    (n.starts_with(&format!("lmnotes-{vault_name}-")) && n.ends_with(".zip"))
+                        .then_some(n)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    Ok(BackupStatus {
+        enabled: cfg.backup.enabled,
+        dest_dir: dest.to_string_lossy().into_owned(),
+        interval_hours: cfg.backup.interval_hours,
+        keep: cfg.backup.keep,
+        count: names.len(),
+        latest: names.last().cloned(),
+    })
+}
+
+/// 手动立即备份（与定时任务同一实现：zip + 修剪）。
+#[tauri::command]
+pub async fn backup_now() -> Result<String, String> {
+    let cfg = crate::llm_config::Config::load_or_default();
+    let root = vault_root();
+    let dest = backup_dest_dir(&cfg.backup, &root);
+    let keep = cfg.backup.keep.max(1);
+    let (path, n, removed) = tauri::async_runtime::spawn_blocking(move || {
+        crate::backup::run_backup_once(&root, &dest, keep)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(format!(
+        "{} 个文件 → {}（清理 {} 份旧备份）",
+        n,
+        path.display(),
+        removed.len()
+    ))
 }
 
 /// 导出 vault 为 zip（流式，排除 .lmnotes/）。dest 为绝对路径。
@@ -1505,43 +1676,17 @@ fn collect_export_files(dir: &Path, out: &mut Vec<PathBuf>) {
 pub async fn export_vault_zip(dest: String, app: tauri::AppHandle) -> Result<u64, String> {
     use tauri::Emitter;
     let root = vault_root();
-    let mut files = Vec::new();
-    collect_export_files(&root, &mut files);
-    files.sort();
-    let out_path = PathBuf::from(&dest);
-    if let Some(pp) = out_path.parent() {
-        tokio::fs::create_dir_all(pp)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-    // zip 写放阻塞线程
-    let root_c = root.clone();
-    let files_c = files.clone();
-    let dest_c = dest.clone();
+    let dest_path = PathBuf::from(&dest);
+    // zip 写放阻塞线程；进度事件经回调透出（zip 主体逻辑与自动备份共用）
+    let app_c = app.clone();
     let count = tauri::async_runtime::spawn_blocking(move || -> Result<u64, String> {
-        let file = std::fs::File::create(&dest_c).map_err(|e| e.to_string())?;
-        let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
-        let total = files_c.len() as u64;
-        for (i, abs) in files_c.iter().enumerate() {
-            let rel = abs
-                .strip_prefix(&root_c)
-                .map_err(|e| e.to_string())?
-                .to_string_lossy()
-                .replace(BS, "/");
-            zip.start_file(&rel, opts).map_err(|e| e.to_string())?;
-            let mut f = std::fs::File::open(abs).map_err(|e| e.to_string())?;
-            std::io::copy(&mut f, &mut zip).map_err(|e| e.to_string())?;
-            if i % 25 == 0 {
-                let _ = app.emit(
-                    "export-progress",
-                    serde_json::json!({ "done": i as u64, "total": total }),
-                );
-            }
-        }
-        zip.finish().map_err(|e| e.to_string())?;
-        Ok(total)
+        let progress = move |done: u64, total: u64| {
+            let _ = app_c.emit(
+                "export-progress",
+                serde_json::json!({ "done": done, "total": total }),
+            );
+        };
+        crate::backup::zip_vault_to(&root, &dest_path, Some(&progress))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -1748,6 +1893,51 @@ created: {}
         });
     }
     Ok(path)
+}
+
+// ============ 主题插件（v1.0 spec §4.3）============
+
+/// 用户主题文件原始载荷：文件名 + JSON 文本（校验在前端 theme/index.ts）。
+#[derive(serde::Serialize)]
+pub struct ThemeFile {
+    pub file: String,
+    pub json: String,
+}
+
+/// 单个主题文件大小上限（spec：防异常大文件）。
+const THEME_FILE_MAX: u64 = 64 * 1024;
+
+/// 扫描目录下全部 *.theme.json（不存在返回空；按文件名排序）。纯函数，便于单测。
+fn scan_theme_dir(dir: &std::path::Path) -> Vec<ThemeFile> {
+    let mut out: Vec<ThemeFile> = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !name.ends_with(".theme.json") {
+            continue;
+        }
+        // 跟随符号链接取目标大小：超限判定对 symlink 指向的真实文件生效；
+        // 元数据读取失败时按超限处理（跳过），保持安全默认。
+        let oversize = std::fs::metadata(e.path())
+            .map(|m| m.is_file() && m.len() > THEME_FILE_MAX)
+            .unwrap_or(true);
+        if oversize {
+            continue;
+        }
+        if let Ok(json) = std::fs::read_to_string(e.path()) {
+            out.push(ThemeFile { file: name, json });
+        }
+    }
+    out.sort_by(|a, b| a.file.cmp(&b.file));
+    out
+}
+
+/// 列出 ~/.lmnotes/themes/ 下的用户主题（只读；解析与校验由前端负责）。
+#[tauri::command]
+pub fn list_themes() -> Result<Vec<ThemeFile>, String> {
+    Ok(scan_theme_dir(&lmnotes_home().join("themes")))
 }
 
 // ============ 媒体任务队列（FR-MEDIA-04，v0.5）============
@@ -3039,7 +3229,7 @@ mod tests {
         asset_kind_of, build_extract_audio_cmd, build_review_content, build_review_digest,
         builtin_whisper_models, daily_header, daily_note_rel, download_urls, media_kind_dir,
         parse_snapshot_ts, pick_preferred_model, render_template_placeholders, scan_source_dir,
-        TimelineEntry,
+        scan_theme_dir, TimelineEntry,
     };
     use chrono::TimeZone;
     use lmnotes_core::index::schema::ConceptRow;
@@ -3303,5 +3493,30 @@ mod tests {
     #[test]
     fn pick_none_when_nothing_downloaded() {
         assert_eq!(pick_preferred_model(&names(&[])), None);
+    }
+
+    // ============ 主题引擎（v1.0 spec §4.3）============
+
+    #[test]
+    fn scan_theme_dir_filters_sorts_and_caps_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir = dir.path();
+        std::fs::write(dir.join("b.theme.json"), r#"{"id":"b"}"#).unwrap();
+        std::fs::write(dir.join("a.theme.json"), r#"{"id":"a"}"#).unwrap();
+        std::fs::write(dir.join("skip.txt"), "not a theme").unwrap();
+        let big = format!("{{{}", "x".repeat(65 * 1024));
+        std::fs::write(dir.join("big.theme.json"), &big).unwrap();
+
+        let themes = scan_theme_dir(dir);
+        assert_eq!(themes.len(), 2, "只收 *.theme.json 且超 64KB 的跳过");
+        assert_eq!(themes[0].file, "a.theme.json", "按文件名排序");
+        assert_eq!(themes[1].json, r#"{"id":"b"}"#);
+    }
+
+    #[test]
+    fn scan_theme_dir_missing_dir_is_empty() {
+        // tempdir 下的 themes/ 子路径必然不存在
+        let dir = tempfile::tempdir().unwrap().path().join("themes");
+        assert!(scan_theme_dir(&dir).is_empty());
     }
 }

@@ -30,6 +30,41 @@ pub struct Config {
     /// 快速捕获浮窗（v0.8 热键可配置）。旧 config 无此段取默认热键。
     #[serde(default)]
     pub capture: CaptureConfig,
+    /// 自动备份（v0.9）。旧 config 无此段取默认（关闭）。
+    #[serde(default)]
+    pub backup: BackupConfig,
+}
+
+/// 自动备份配置（v0.9）。目录缺省 `~/.lmnotes/backups/<vault 名>`；
+/// enabled 默认关闭；改动重启生效（与热键同语义）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_backup_interval_hours")]
+    pub interval_hours: u64,
+    #[serde(default = "default_backup_keep")]
+    pub keep: usize,
+    #[serde(default)]
+    pub dest_dir: Option<String>,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            interval_hours: default_backup_interval_hours(),
+            keep: default_backup_keep(),
+            dest_dir: None,
+        }
+    }
+}
+
+fn default_backup_interval_hours() -> u64 {
+    24
+}
+fn default_backup_keep() -> usize {
+    7
 }
 
 /// 全局快捷键配置（Tauri accelerator 语法，如 `CmdOrCtrl+Shift+L`）。
@@ -279,6 +314,7 @@ impl Default for Config {
             vaults: default_vaults(),
             last_vault: None,
             capture: CaptureConfig::default(),
+            backup: BackupConfig::default(),
         }
     }
 }
@@ -727,6 +763,7 @@ mod tests {
             vaults: default_vaults(),
             last_vault: None,
             capture: CaptureConfig::default(),
+            backup: BackupConfig::default(),
         }
     }
 
@@ -1001,6 +1038,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(legacy.capture.hotkey, "CmdOrCtrl+Shift+L");
+        // v0.9：backup 段缺省 = 关闭 + 默认间隔/保留数
+        assert!(!legacy.backup.enabled);
+        assert_eq!(legacy.backup.interval_hours, 24);
+        assert_eq!(legacy.backup.keep, 7);
+        assert!(legacy.backup.dest_dir.is_none());
         let custom = serde_yaml::from_str::<Config>(
             "providers: []\nrouting: {}\nguard:\n  cloud_allowed: false\n  sensitive_patterns: []\ncapture:\n  hotkey: Ctrl+Shift+K\n",
         )

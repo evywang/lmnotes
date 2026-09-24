@@ -1,45 +1,29 @@
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, message as dialogMessage } from "@tauri-apps/plugin-dialog";
 import { useVault, runSearch } from "./store/vault";
+import { setContextView } from "./store/ui";
+import { loadSuggestions } from "./store/llm";
 import { Editor } from "./editor/Editor";
 import { Capture } from "./capture/Capture";
-import { SuggestionCenter } from "./suggestions/SuggestionCenter";
 import { ProviderSettings } from "./settings/ProviderSettings";
 import { VoiceCapture } from "./voice/VoiceCapture";
-import { MediaTasksButton, MediaTasksPanel, initMediaTaskFeed, openMediaTasks } from "./voice/MediaTasks";
+import { MediaTasksPanel, initMediaTaskFeed, openMediaTasks } from "./voice/MediaTasks";
 import { ChatDrawer } from "./chat/ChatDrawer";
 import { KnowledgeGraph } from "./graph/KnowledgeGraph";
-import { FileTree } from "./components/FileTree";
-import { PromptDialogHost, showPrompt } from "./components/PromptDialog";
-import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
 import { TimelineView } from "./components/TimelineView";
-import { TagCloud } from "./components/TagCloud";
+import { PromptDialogHost } from "./components/PromptDialog";
+import { CommandPalette, type PaletteAction } from "./components/CommandPalette";
+import { Rail } from "./components/Rail";
+import { ContextColumn } from "./components/ContextColumn";
+import { RightPanel } from "./components/RightPanel";
+import { Welcome } from "./components/Welcome";
+import { allThemes, setTheme } from "./theme";
 import { t } from "./i18n";
 
-/** 侧栏当前库指示（v0.4 多库）：显示库名，点击打开设置切换。 */
-function VaultBadge(props: { onOpenSettings: () => void }) {
-  const [name, setName] = createSignal<string | null>(null);
-  onMount(async () => {
-    try {
-      const vs = await invoke<{ name: string; current: boolean }[]>("list_vaults");
-      setName(vs.find((v) => v.current)?.name ?? null);
-    } catch {
-      // 静默：指示器失败不打扰
-    }
-  });
-  return (
-    <Show when={name()}>
-      <button class="vault-badge" title={t("vault.badgeTooltip")} onClick={props.onOpenSettings}>
-        📚 {name()}
-      </button>
-    </Show>
-  );
-}
-
 export function App() {
-  const { query, setQuery, results, searching, activePath, setActivePath } = useVault();
+  const { setQuery, activePath, setActivePath } = useVault();
   const [captureOpen, setCaptureOpen] = createSignal(false);
   const [voiceOpen, setVoiceOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
@@ -47,98 +31,85 @@ export function App() {
   const [graphOpen, setGraphOpen] = createSignal(false);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [timelineOpen, setTimelineOpen] = createSignal(false);
-  const [tagFilter, setTagFilter] = createSignal<string | null>(null);
+  const [timelineTag, setTimelineTag] = createSignal<string | null>(null);
   const [reviewBusy, setReviewBusy] = createSignal(false);
+  // 面板直达问答（v0.9）：palette/上下文栏写入 → ChatDrawer 消费后自动发送
+  const [askQuestion, setAskQuestion] = createSignal<string | null>(null);
   const [treeRefresh, setTreeRefresh] = createSignal(0);
-  const [treeOpen, setTreeOpen] = createSignal(false);
 
+  // 快捷键（v1.0 spec §3.5）：⌘N 语义由「快速捕获浮窗」改为「直接新建笔记」；
+  // 浮窗入口保留在命令面板 + 全局热键（Ctrl+Shift+L）。新增 ⌘1/2/3 视图、⌘D 今日。
   const onKeyDown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
+    const mod = e.ctrlKey || e.metaKey;
+    if (!mod) return;
+    const k = e.key.toLowerCase();
+    if (k === "n" && !e.shiftKey) {
       e.preventDefault();
-      setCaptureOpen(true);
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+      void createNote();
+    } else if (k === ",") {
       e.preventDefault();
       setSettingsOpen(true);
-    }
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "j" || e.code === "KeyJ")) {
+    } else if (k === "j") {
       e.preventDefault();
       setChatOpen(true);
-    }
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "g" || e.code === "KeyG")) {
+    } else if (k === "g") {
       e.preventDefault();
       setGraphOpen(true);
-    }
-    // 语音输入：Ctrl/Cmd+Shift+V（避开 Ctrl+V 粘贴）
-    if (
-      (e.ctrlKey || e.metaKey) &&
-      e.shiftKey &&
-      (e.key.toLowerCase() === "v" || e.code === "KeyV")
-    ) {
+    } else if (k === "v" && e.shiftKey) {
       e.preventDefault();
       setVoiceOpen(true);
-    }
-    // 命令面板（FR-SEARCH-01）：Ctrl/Cmd+K
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || e.code === "KeyK")) {
+    } else if (k === "k") {
       e.preventDefault();
       setPaletteOpen(true);
+    } else if (k === "d") {
+      e.preventDefault();
+      void openDaily();
+    } else if (e.key === "1" || e.key === "2" || e.key === "3") {
+      e.preventDefault();
+      setContextView((["notes", "tags", "files"] as const)[Number(e.key) - 1]);
     }
   };
   onMount(() => {
     initMediaTaskFeed();
-    // 全局快捷键浮窗（FR-CAP-01）保存成功 / 库导入（FR-STORE-06）完成后
-    // 刷新文件树与搜索结果
+    void loadSuggestions(); // 右面板计数在面板未开时也要就绪
+    // 全局快捷键浮窗保存 / 库导入 / 回顾生成 后：刷新列表、搜索与建议
     const refresh = () => {
       setTreeRefresh((n) => n + 1);
       runSearch("");
+      void loadSuggestions();
     };
     void listen("quick-note-saved", refresh);
     void listen("vault-changed", refresh);
+    // Editor 顶栏生成回顾后派发的本地刷新（回顾文件不走上述两个 Tauri 事件）
+    window.addEventListener("lmnotes:refresh", refresh);
+    onCleanup(() => window.removeEventListener("lmnotes:refresh", refresh));
   });
   window.addEventListener("keydown", onKeyDown);
   onCleanup(() => window.removeEventListener("keydown", onKeyDown));
 
-  // 模板清单（懒加载一次）；新建时若选了模板 → create_note_from_template
-  let templatesCache: { name: string; path: string }[] | null = null;
-  const loadTemplates = async () => {
-    if (!templatesCache) {
-      try {
-        templatesCache = await invoke<{ name: string; path: string }[]>("list_templates");
-      } catch {
-        templatesCache = [];
-      }
-    }
-    return templatesCache;
-  };
-
-  const createNote = async () => {
-    const title = await showPrompt(t("app.noteTitlePrompt"), t("app.newNoteTitle"));
-    if (!title) return;
+  // 新建笔记（spec §6）：零弹窗直接建草稿，标题=「未命名 时间戳」，在编辑器内改；
+  // 模板走上下文栏 ＋ 按钮的 ▾ 菜单（createNote(templatePath)）。
+  // creating 守卫：快速连按 ⌘N 时，后端同分钟同名路径会静默覆盖，前端先挡一道。
+  let creatingNote = false;
+  const createNote = async (templatePath?: string) => {
+    if (creatingNote) return;
+    creatingNote = true;
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const title = `${t("app.untitled")} ${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate(),
+    )} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
     try {
-      const templates = await loadTemplates();
-      let path: string;
-      if (templates.length > 0) {
-        // 有模板：二次弹选（含"空白笔记"项）
-        const names = [t("app.noTemplate"), ...templates.map((t2) => t2.name)];
-        const picked = await showPrompt(t("app.templatePrompt"), "");
-        // showPrompt 只能输入文本；模板较多时体验一般——保持轻量：输入名称精确匹配，空 = 空白
-        const wanted = picked?.trim();
-        const tpl = wanted ? templates.find((t2) => t2.name === wanted) : undefined;
-        if (wanted && !tpl) return; // 输入了未知模板名 → 取消
-        path = tpl
-          ? await invoke<string>("create_note_from_template", {
-              templatePath: tpl.path,
-              title,
-            })
-          : await invoke<string>("create_note", { title });
-      } else {
-        path = await invoke<string>("create_note", { title });
-      }
+      const path = templatePath
+        ? await invoke<string>("create_note_from_template", { templatePath, title })
+        : await invoke<string>("create_note", { title });
       setActivePath(path);
-      runSearch("");
+      setQuery("");
       setTreeRefresh((n) => n + 1);
     } catch (e) {
       console.error("create note", e);
+    } finally {
+      creatingNote = false;
     }
   };
 
@@ -146,21 +117,24 @@ export function App() {
     const selected = await open({
       multiple: false,
       filters: [
-        { name: t("app.importFilterName"), extensions: ["md", "markdown", "txt", "pdf", "docx", "xlsx", "xls"] },
+        {
+          name: t("app.importFilterName"),
+          extensions: ["md", "markdown", "txt", "pdf", "docx", "xlsx", "xls"],
+        },
       ],
     });
     if (!selected || typeof selected !== "string") return;
     try {
       const path = await invoke<string>("import_document", { filePath: selected });
       setActivePath(path);
-      runSearch("");
+      setQuery("");
       setTreeRefresh((n) => n + 1);
     } catch (e) {
       console.error("import note", e);
     }
   };
 
-  // 今日笔记（FR-SEARCH-05）：幂等打开/创建，侧栏按钮与命令面板共用。
+  // 今日笔记（FR-SEARCH-05）：幂等打开/创建。
   const openDaily = async () => {
     try {
       const path = await invoke<string>("open_or_create_daily");
@@ -171,13 +145,12 @@ export function App() {
     }
   };
 
-  // 打开时间线（FR-SEARCH-05）：tag 为空 = 全量时间线，非空 = 标签过滤列表。
   const openTimeline = (tag: string | null) => {
-    setTagFilter(tag);
+    setTimelineTag(tag);
     setTimelineOpen(true);
   };
 
-  // 每日/每周回顾（FR-LLM-07，v0.8）：LLM 生成耗时，侧栏显示进行中提示。
+  // 每日/每周回顾（FR-LLM-07）：palette 入口（编辑器顶栏 ✦ 菜单为另一入口）。
   const generateReview = async (range: "daily" | "weekly") => {
     if (reviewBusy()) return;
     setReviewBusy(true);
@@ -194,7 +167,7 @@ export function App() {
     }
   };
 
-  // 命令面板动作表（FR-SEARCH-01）：标签走 i18n，执行闭包复用既有入口。
+  // 命令面板动作表（FR-SEARCH-01）：图标 Emoji 暂留，P2 统一换 Icon。
   const paletteActions = (): PaletteAction[] => [
     { id: "new-note", icon: "📝", label: t("palette.newNote"), run: () => void createNote() },
     { id: "quick-capture", icon: "⚡", label: t("palette.quickCapture"), run: () => setCaptureOpen(true) },
@@ -207,114 +180,66 @@ export function App() {
     { id: "weekly-review", icon: "📆", label: t("palette.weeklyReview"), run: () => void generateReview("weekly") },
     { id: "tasks", icon: "⏳", label: t("palette.tasks"), run: () => openMediaTasks() },
     { id: "settings", icon: "⚙", label: t("palette.settings"), run: () => setSettingsOpen(true) },
+    ...allThemes().map((th) => ({
+      id: `theme-${th.id}`,
+      icon: "◐",
+      label: `${t("palette.switchTheme")}: ${th.builtin ? t(th.nameKey!) : th.name}`,
+      run: () => setTheme(th.id),
+    })),
+    {
+      id: "theme-auto",
+      icon: "◐",
+      label: `${t("palette.switchTheme")}: ${t("settings.themeAuto")}`,
+      run: () => setTheme("auto"),
+    },
   ];
 
   return (
     <>
-      <div class="layout">
-        <aside class="sidebar">
-          <input
-            class="search-input"
-            placeholder={t("app.searchPlaceholder")}
-            value={query()}
-            onInput={(e) => setQuery(e.currentTarget.value)}
-            onKeyDown={(e) => e.key === "Enter" && runSearch(query())}
-          />
-          <div class="sidebar-actions">
-            <button class="action-btn" onClick={createNote} title={t("app.newNoteTooltip")}>
-              {t("app.newNoteBtn")}
-            </button>
-            <button class="action-btn" onClick={importNote} title={t("app.importTooltip")}>
-              {t("app.importBtn")}
-            </button>
-            <button
-              class="action-btn"
-              onClick={() => setVoiceOpen(true)}
-              title={t("app.voiceTooltip")}
-            >
-              {t("app.voiceBtn")}
-            </button>
-          </div>
-          <VaultBadge onOpenSettings={() => setSettingsOpen(true)} />
-          <MediaTasksButton />
-          <button class="chat-btn" onClick={() => setChatOpen(true)}>
-            {t("app.chatBtn")}
-          </button>
-          <button class="chat-btn" onClick={() => setGraphOpen(true)}>
-            {t("app.graphBtn")}
-          </button>
-          <button class="chat-btn" onClick={() => void openDaily()} title={t("app.dailyTooltip")}>
-            {t("app.dailyBtn")}
-          </button>
-          <button class="chat-btn" onClick={() => openTimeline(null)}>
-            {t("app.timelineBtn")}
-          </button>
-          <TagCloud onPick={(tag) => openTimeline(tag)} />
-          <Show when={reviewBusy()}>
-            <p class="muted small">{t("review.generating")}</p>
-          </Show>
-          <Show when={searching()}>
-            <p class="muted">{t("app.searching")}</p>
-          </Show>
-          <ul class="result-list">
-            <For each={results()}>
-              {(r) => (
-                <li>
-                  <button class="result-item" onClick={() => setActivePath(r.path)}>
-                    <span class="result-title">{r.title || r.path}</span>
-                    <span class="result-path">{r.path}</span>
-                  </button>
-                </li>
-              )}
-            </For>
-          </ul>
-          <Show when={!searching() && results().length === 0}>
-            <p class="muted small">{t("app.searchHint")}</p>
-          </Show>
-          <div class={`tree-stack ${treeOpen() ? "tree-stack-open" : ""}`}>
-            <button
-              class="tree-stack-header"
-              onClick={() => setTreeOpen((v) => !v)}
-            >
-              <span class="tree-stack-arrow">{treeOpen() ? "▼" : "▶"}</span>
-              <span>{t("app.files")}</span>
-            </button>
-            <Show when={treeOpen()}>
-              <div class="tree-stack-body">
-                <FileTree
-                  onOpen={(path) => setActivePath(path)}
-                  activePath={activePath}
-                  refreshKey={treeRefresh}
-                />
-              </div>
-            </Show>
-          </div>
-        </aside>
-
-        <main class="content">
-          {/* keyed：路径变化即重挂载 Editor。否则 <Show> 在 truthy→truthy 切换时
-              不重挂载，Editor 的 onMount（内容加载）只跑一次，点别的文件不换内容 */}
-          <Show when={activePath()} keyed fallback={<p class="placeholder">{t("app.placeholder")}</p>}>
+      <div class="app-shell">
+        <Rail
+          active={chatOpen() ? "chat" : graphOpen() ? "graph" : null}
+          onDaily={() => void openDaily()}
+          onTimeline={() => openTimeline(null)}
+          onGraph={() => setGraphOpen(true)}
+          onAsk={() => setChatOpen(true)}
+          onTasks={() => openMediaTasks()}
+          onSettings={() => setSettingsOpen(true)}
+        />
+        <ContextColumn
+          refreshKey={treeRefresh()}
+          onOpenNote={setActivePath}
+          onAsk={(q) => {
+            setAskQuestion(q);
+            setChatOpen(true);
+          }}
+          onVoice={() => setVoiceOpen(true)}
+          onImport={importNote}
+          onNewNote={() => void createNote()}
+          onNewFromTemplate={(p) => void createNote(p)}
+        />
+        <main class="main-col">
+          {/* keyed：路径变化即重挂载 Editor（同 v0.9 行为，防止切换文件不刷内容） */}
+          <Show
+            when={activePath()}
+            keyed
+            fallback={<Welcome onNew={() => void createNote()} onImport={importNote} />}
+          >
             {(path) => <Editor path={path} onNavigate={setActivePath} />}
           </Show>
         </main>
-
-        <aside class="backrefs">
-          <h3 class="panel-title">{t("app.suggestionCenter")}</h3>
-          <SuggestionCenter />
-        </aside>
+        <RightPanel />
       </div>
 
-      <button class="settings-btn" title={t("app.settingsTooltip")} onClick={() => setSettingsOpen(true)}>
-        ⚙
-      </button>
-
-      {/* 命令面板（FR-SEARCH-01） */}
       <CommandPalette
         open={paletteOpen()}
         onClose={() => setPaletteOpen(false)}
-        onOpenNote={(path) => setActivePath(path)}
+        onOpenNote={setActivePath}
         actions={paletteActions}
+        onAsk={(q) => {
+          setAskQuestion(q);
+          setChatOpen(true);
+        }}
       />
 
       {/* 文本输入对话框宿主（应用名标题，替代 window.prompt） */}
@@ -340,7 +265,9 @@ export function App() {
       <Show when={chatOpen()}>
         <ChatDrawer
           onClose={() => setChatOpen(false)}
-          onNavigate={(path) => setActivePath(path)}
+          onNavigate={setActivePath}
+          pendingQuestion={askQuestion()}
+          onQuestionConsumed={() => setAskQuestion(null)}
         />
       </Show>
       <Show when={graphOpen()}>
@@ -355,7 +282,7 @@ export function App() {
       </Show>
       <Show when={timelineOpen()}>
         <TimelineView
-          tag={tagFilter()}
+          tag={timelineTag()}
           onClose={() => setTimelineOpen(false)}
           onOpen={(path) => {
             setActivePath(path);

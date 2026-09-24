@@ -6,6 +6,7 @@ import { LocalSttSetup } from "../voice/LocalSttSetup";
 import { open as openDialog, save as saveDialog, message, ask } from "@tauri-apps/plugin-dialog";
 import { APP_NAME } from "../components/PromptDialog";
 import { VaultSection } from "./VaultSection";
+import { ThemePicker } from "../theme/ThemePicker";
 
 interface ProviderRefSer {
   provider: string;
@@ -46,6 +47,7 @@ interface Config {
   guard: { cloud_allowed: boolean; sensitive_patterns: string[] };
   media: { background_threshold_ms: number };
   capture: { hotkey: string };
+  backup: { enabled: boolean; interval_hours: number; keep: number; dest_dir?: string | null };
 }
 
 interface ProviderHealth {
@@ -61,6 +63,16 @@ interface UsageRow {
   calls: number;
   tokens: number;
   last_ts: number;
+}
+
+/** 备份状态（get_backup_status 命令返回）。 */
+interface BackupStatus {
+  enabled: boolean;
+  dest_dir: string;
+  interval_hours: number;
+  keep: number;
+  count: number;
+  latest: string | null;
 }
 
 /** 导入报告（import_vault 命令返回）。 */
@@ -80,6 +92,47 @@ export function ProviderSettings(props: { onClose: () => void }) {
   const [saving, setSaving] = createSignal(false);
   const [importing, setImporting] = createSignal(false);
   const [usage, setUsage] = createSignal<UsageRow[]>([]);
+  const [autostart, setAutostart] = createSignal(false);
+  const [backupStatus, setBackupStatus] = createSignal<BackupStatus | null>(null);
+  const [backupBusy, setBackupBusy] = createSignal(false);
+
+  const refreshBackupStatus = async () => {
+    try {
+      setBackupStatus(await invoke<BackupStatus>("get_backup_status"));
+    } catch {
+      /* 状态读失败静默 */
+    }
+  };
+  const backupNow = async () => {
+    if (backupBusy()) return;
+    setBackupBusy(true);
+    try {
+      const msg = await invoke<string>("backup_now");
+      void message(msg, { title: APP_NAME });
+      await refreshBackupStatus();
+    } catch (e) {
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const refreshAutostart = async () => {
+    try {
+      setAutostart(await invoke<boolean>("get_autostart"));
+    } catch {
+      /* 读不到按关闭处理 */
+    }
+  };
+  const toggleAutostart = async (enabled: boolean) => {
+    setAutostart(enabled);
+    try {
+      await invoke("set_autostart", { enabled });
+    } catch (e) {
+      setAutostart(!enabled);
+      void message(String(e), { title: APP_NAME, kind: "error" });
+    }
+  };
 
   const refreshUsage = async () => {
     try {
@@ -147,6 +200,8 @@ export function ProviderSettings(props: { onClose: () => void }) {
       console.error("load config", e);
     }
     void refreshUsage();
+    void refreshAutostart();
+    void refreshBackupStatus();
   });
 
   const save = async () => {
@@ -249,6 +304,12 @@ export function ProviderSettings(props: { onClose: () => void }) {
                     </button>
                   </div>
                 </div>
+              </div>
+
+              {/* 外观：主题插件（v1.0 spec §4.3） */}
+              <div class="appearance-section">
+                <h3>{t("settings.appearance")}</h3>
+                <ThemePicker />
               </div>
 
               <VaultSection />
@@ -425,6 +486,97 @@ export function ProviderSettings(props: { onClose: () => void }) {
               </div>
 
               <LocalSttSetup />
+
+              <div class="data-section">
+                <h3>{t("residency.title")}</h3>
+                <label class="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={autostart()}
+                    onChange={(e) => void toggleAutostart(e.currentTarget.checked)}
+                  />
+                  {t("residency.autostart")}
+                </label>
+                <p class="muted small">{t("residency.hint")}</p>
+              </div>
+
+              <div class="data-section">
+                <h3>{t("backup.title")}</h3>
+                <Show when={config()}>
+                  <label class="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={cfg().backup?.enabled ?? false}
+                      onChange={(e) =>
+                        setConfig({
+                          ...cfg(),
+                          backup: {
+                            ...(cfg().backup ?? {
+                              enabled: false,
+                              interval_hours: 24,
+                              keep: 7,
+                              dest_dir: null,
+                            }),
+                            enabled: e.currentTarget.checked,
+                          },
+                        })
+                      }
+                    />
+                    {t("backup.enabled")}
+                  </label>
+                  <label>
+                    {t("backup.interval")}
+                    <input
+                      type="number"
+                      min="1"
+                      style={{ width: "90px" }}
+                      value={cfg().backup?.interval_hours ?? 24}
+                      onInput={(e) =>
+                        setConfig({
+                          ...cfg(),
+                          backup: {
+                            ...(cfg().backup ?? { enabled: false, keep: 7, dest_dir: null }),
+                            interval_hours: Math.max(1, Number(e.currentTarget.value) || 24),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    {t("backup.keep")}
+                    <input
+                      type="number"
+                      min="1"
+                      style={{ width: "90px" }}
+                      value={cfg().backup?.keep ?? 7}
+                      onInput={(e) =>
+                        setConfig({
+                          ...cfg(),
+                          backup: {
+                            ...(cfg().backup ?? { enabled: false, interval_hours: 24, dest_dir: null }),
+                            keep: Math.max(1, Number(e.currentTarget.value) || 7),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <p class="muted small">
+                    {t("backup.destPrefix")}
+                    {backupStatus()?.dest_dir}
+                  </p>
+                  <p class="muted small">
+                    {backupStatus()?.latest
+                      ? t("backup.latest", { n: backupStatus()!.count, f: backupStatus()!.latest! })
+                      : t("backup.none")}
+                  </p>
+                </Show>
+                <div class="settings-actions" style={{ "justify-content": "flex-start" }}>
+                  <button class="btn-secondary" onClick={() => void backupNow()} disabled={backupBusy()}>
+                    {backupBusy() ? t("backup.running") : t("backup.nowBtn")}
+                  </button>
+                </div>
+                <p class="muted small">{t("backup.hint")}</p>
+              </div>
 
               <div class="data-section">
                 <h3>{t("hotkey.title")}</h3>

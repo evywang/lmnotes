@@ -7,6 +7,7 @@ export const en = {
   // ── App shell ─────────────────────────────────────────────────────────
   "app.searchPlaceholder": "Search… (Enter)",
   "app.newNoteTitle": "New note",
+  "app.untitled": "Untitled",
   "app.noteTitlePrompt": "Note title:",
   "app.templatePrompt": "Template name (empty = blank note):",
   "app.noTemplate": "(blank note)",
@@ -272,6 +273,74 @@ export const en = {
   // ── Global hotkey (v0.8) ──────────────────────────────────────────────
   "hotkey.title": "⚡ Global hotkey (quick capture)",
   "hotkey.hint": "Tauri accelerator syntax, e.g. CmdOrCtrl+Shift+L. Takes effect after restart.",
+
+  // ── Search & residency (v0.9) ─────────────────────────────────────────
+  "search.semanticBadge": "semantic",
+  "search.semanticNote": "Semantic search is contributing to ranking.",
+  "palette.ask": "Ask LMNotes",
+  "residency.title": "🏠 Residency",
+  "residency.autostart": "Launch at system startup",
+  "residency.hint": "Closing the main window keeps LMNotes in the system tray (global hotkey & quick capture stay available). Use tray → Quit to fully exit.",
+
+  // ── Backup (v0.9) ──────────────────────────────────────────────────────
+  "backup.title": "🗄 Auto backup",
+  "backup.enabled": "Scheduled backup (takes effect after restart)",
+  "backup.interval": "Interval (hours)",
+  "backup.keep": "Keep (copies)",
+  "backup.destPrefix": "Destination: ",
+  "backup.latest": "{n} backup(s), latest: {f}",
+  "backup.none": "No backups yet.",
+  "backup.nowBtn": "Back up now",
+  "backup.running": "Backing up…",
+  "backup.hint": "ZIP snapshots exclude derived data (.lmnotes/). Older copies beyond the keep limit are pruned automatically.",
+
+  // ── Theme (v1.0) ──────────────────────────────────────────────────────
+  "theme.graphiteDark": "Graphite · Dark",
+  "theme.graphiteLight": "Graphite · Light",
+  "theme.warmPaper": "Warm Paper",
+  "theme.inkBlack": "Ink Black",
+  "settings.appearance": "Appearance",
+  "settings.themeAuto": "Follow system",
+  "settings.themeRescan": "Rescan",
+  "settings.themeInvalid": "Invalid theme files (skipped): {files}",
+  "palette.switchTheme": "Switch theme",
+
+  "nav.label": "Navigation",
+  "nav.notes": "Notes (⌘1)",
+  "nav.daily": "Today's note (⌘D)",
+  "nav.timeline": "Timeline",
+  "nav.graph": "Knowledge graph (⌘G)",
+  "nav.ask": "Ask LMNotes (⌘J)",
+  "nav.tasks": "Media tasks",
+  "nav.settings": "Settings (⌘,)",
+  "nav.vaultTooltip": "Current vault: {name}",
+
+  "ctx.searchPlaceholder": "Search or ask…",
+  "ctx.clearSearch": "Clear search",
+  "ctx.newNote": "New note",
+  "ctx.newNoteTooltip": "New note (⌘N)",
+  "ctx.blankNote": "Blank note",
+  "ctx.import": "Import",
+  "ctx.view_notes": "Notes",
+  "ctx.view_tags": "Tags",
+  "ctx.view_files": "Files",
+  "ctx.today": "Today",
+  "ctx.noResults": "No matches — try asking LMNotes",
+  "ctx.askPrefix": "Ask LMNotes",
+  "ctx.emptyVault": "Vault is empty — press ⌘N to create your first note",
+  "ctx.tagFilterClear": "Clear tag filter",
+
+  "topbar.aiMenu": "AI",
+  "topbar.unsaved": "Unsaved",
+  "topbar.saving": "Saving…",
+  "rewrite.failedWhole": "Rewrite failed: ",
+
+  "panel.suggestions": "Suggestions",
+  "panel.close": "Close",
+  "welcome.subtitle": "Your local-first AI notebook",
+  "welcome.keySearch": "Search or run a command",
+  "welcome.keyNew": "New note",
+  "welcome.keyAsk": "Ask LMNotes",
 } satisfies Record<string, string>;
 
 export type MessageKey = keyof typeof en;

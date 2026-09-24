@@ -60,7 +60,8 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
   let text = dict[key] ?? en[key] ?? key;
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      // 函数替换器：参数值（如主题文件名）中的 $&/$' 等不被当作替换模式解释
+      text = text.replace(new RegExp(`\\{${k}\\}`, "g"), () => String(v));
     }
   }
   return text;

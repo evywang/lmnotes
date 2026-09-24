@@ -1,5 +1,6 @@
 //! LMNotes 桌面应用（Tauri 2）IPC 壳。
 
+mod backup;
 mod commands;
 mod llm_config;
 mod media_tasks;
@@ -57,6 +58,67 @@ fn toggle_quick_capture(app: &tauri::AppHandle) {
             eprintln!("[hotkey] create quick-capture window failed: {e}");
         }
     }
+}
+
+/// 显示并聚焦主窗口（托盘菜单/左键单击）。
+fn show_main_window(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
+/// 常驻能力（v0.9「搜索与常驻」）：系统托盘（打开主窗/快速捕获/退出 +
+/// 左键单击显示主窗）+ 关闭驻留（主窗关闭按钮 → 隐藏进托盘，真退出走托盘菜单）。
+/// 托盘文案为 Rust 侧固定字符串，采用「中文 / English」双语并写。
+fn setup_residency(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri::menu::{Menu, MenuItem};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tauri::Manager;
+
+    let open = MenuItem::with_id(app, "open", "打开主窗口 / Open", true, None::<&str>)?;
+    let capture = MenuItem::with_id(app, "capture", "快速捕获 / Capture", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出 / Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &capture, &quit])?;
+
+    TrayIconBuilder::with_id("main-tray")
+        .icon(app.default_window_icon().expect("app icon").clone())
+        .tooltip("LMNotes")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => show_main_window(app),
+            "capture" => toggle_quick_capture(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show_main_window(tray.app_handle());
+            }
+        })
+        .build(app)?;
+
+    // 关闭驻留：拦截主窗关闭 → 隐藏（全局热键/托盘仍可用）
+    if let Some(win) = app.get_webview_window("main") {
+        let app_handle = app.handle().clone();
+        win.on_window_event(move |event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Some(w) = app_handle.get_webview_window("main") {
+                    let _ = w.hide();
+                }
+            }
+        });
+    }
+    Ok(())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -281,6 +343,10 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_shell::init())
         // 全局快捷键（FR-CAP-01，v0.7）：CmdOrCtrl+Shift+L 切换快速捕获浮窗。
         // 注册在 setup 内（Rust 侧 GlobalShortcutExt，不经过 JS 权限）。
@@ -317,11 +383,19 @@ pub fn run() {
                     "[hotkey] register {hotkey} failed: {e} (被占用？可在设置中修改热键；应用内 Ctrl+N 捕获不受影响)"
                 );
             }
+            setup_residency(app)?;
+            // v0.9 自动备份：enabled 时启动定时任务（读一次配置，改配置重启生效）
+            backup::spawn_backup_task(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::ping,
             commands::search,
+            commands::search_hybrid,
+            commands::get_autostart,
+            commands::set_autostart,
+            commands::get_backup_status,
+            commands::backup_now,
             commands::list_note_titles,
             commands::list_snapshots,
             commands::read_snapshot,
@@ -335,6 +409,7 @@ pub fn run() {
             commands::create_media_note,
             commands::describe_image,
             commands::list_templates,
+            commands::list_themes,
             commands::create_note_from_template,
             commands::export_vault_zip,
             commands::init_git_repo,

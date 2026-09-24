@@ -32,6 +32,8 @@ interface Props {
   onClose: () => void;
   onOpenNote: (path: string) => void;
   actions: () => PaletteAction[];
+  /** v0.9 直达问答：非空查询时面板尾部出现「问 LMNotes」动作 */
+  onAsk?: (q: string) => void;
 }
 
 function baseName(path: string): string {
@@ -79,6 +81,10 @@ export function CommandPalette(props: Props) {
       for (const hit of notes()) {
         pushItem("📄", hit.title || baseName(hit.path), hit.path, () => props.onOpenNote(hit.path));
       }
+    }
+    // 直达问答（v0.9）：有输入且宿主提供 onAsk 时，作为最后一项
+    if (q && props.onAsk) {
+      pushItem("💬", t("palette.ask"), query().trim(), () => props.onAsk!(query().trim()));
     }
     return { rows, itemCount: n };
   };
